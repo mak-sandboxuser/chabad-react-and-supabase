@@ -2,10 +2,12 @@ import { useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useNavigate } from "react-router-dom";
 
+import { PLAN_MONTHLY, PLAN_PRICES } from "../lib/format";
+
 const MEMBERSHIP_PLANS = [
-  { id: "basic", name: "Basic", priceLabel: "₹999/year" },
-  { id: "standard", name: "Standard", priceLabel: "₹2,499/year" },
-  { id: "premium", name: "Premium", priceLabel: "₹4,999/year" },
+  { id: "basic", name: "Basic", priceLabel: `₹${PLAN_PRICES.basic.toLocaleString("en-IN")}/year`, monthlyLabel: `₹${PLAN_MONTHLY.basic}/month` },
+  { id: "standard", name: "Standard", priceLabel: `₹${PLAN_PRICES.standard.toLocaleString("en-IN")}/year`, monthlyLabel: `₹${PLAN_MONTHLY.standard}/month` },
+  { id: "premium", name: "Premium", priceLabel: `₹${PLAN_PRICES.premium.toLocaleString("en-IN")}/year`, monthlyLabel: `₹${PLAN_MONTHLY.premium}/month` },
 ];
 
 export default function SignUpForm() {
@@ -39,6 +41,7 @@ export default function SignUpForm() {
         data: {
           full_name: fullName,
           membership_plan: selectedPlan,
+          monthly_contribution: PLAN_MONTHLY[selectedPlan],
         },
       },
     });
@@ -163,6 +166,7 @@ export default function SignUpForm() {
               >
                 <p className="text-[13px] font-semibold text-gray-800">{plan.name}</p>
                 <p className="text-xs text-gray-500 mt-1">{plan.priceLabel}</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">{plan.monthlyLabel} contribution</p>
               </button>
             );
           })}

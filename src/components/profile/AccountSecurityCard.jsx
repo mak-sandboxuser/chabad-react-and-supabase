@@ -1,4 +1,9 @@
-export default function AccountSecurityCard({ lastSignIn = "May 12, 2025 at 10:15 AM" }) {
+import { formatDate, formatTime } from "../../lib/format";
+
+export default function AccountSecurityCard({ lastSignIn }) {
+  const display = lastSignIn
+    ? `${formatDate(lastSignIn)} at ${formatTime(lastSignIn)}`
+    : "Not available";
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5">
       <div className="flex items-center gap-2.5 mb-3">
@@ -11,7 +16,7 @@ export default function AccountSecurityCard({ lastSignIn = "May 12, 2025 at 10:1
 
       <p className="text-[13px] font-semibold text-gray-700 mb-1">Your account is secure</p>
       <p className="text-[12px] text-gray-500 leading-relaxed">
-        You last signed in on<br />{lastSignIn}
+        You last signed in on<br />{display}
       </p>
 
       <button className="flex items-center gap-1.5 text-[13px] text-[#1a6bdc] font-semibold hover:underline mt-3">

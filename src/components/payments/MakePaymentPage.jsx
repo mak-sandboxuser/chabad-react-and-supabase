@@ -7,8 +7,10 @@ import PaymentDetailsForm from "./PaymentDetailsForm";
 import PaymentSummary from "./PaymentSummary";
 import ContributionImpact from "./ContributionImpact";
 import SecurePaymentNotice from "./SecurePaymentNotice";
+import { useCurrentUser } from "../../hooks/useCurrentUser";
 
 export default function MakePaymentPage() {
+  const { userName, notificationCount } = useCurrentUser();
   const [step, setStep] = useState(1);
   const [paymentData, setPaymentData] = useState({ amount: "150.00", method: "credit", notes: "" });
 
@@ -26,7 +28,7 @@ export default function MakePaymentPage() {
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* ✅ Reused TopBar */}
-        <TopBar userName="John Doe" notificationCount={5} title="Make a Payment" />
+        <TopBar userName={userName} notificationCount={notificationCount} title="Make a Payment" />
         <div className="bg-white px-6 -mt-px pb-3 border-b border-gray-100">
           <p className="text-[13px] text-gray-400">Submit a one-time contribution to support our community.</p>
         </div>

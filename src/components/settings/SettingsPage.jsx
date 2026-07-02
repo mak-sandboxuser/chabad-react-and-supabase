@@ -3,9 +3,11 @@ import Sidebar from "../dashboard/Sidebar";
 import TopBar from "../dashboard/TopBar";
 import SettingsCategoriesList from "./SettingsCategoriesList";
 import PrivacySecurityBanner from "./PrivacySecurityBanner";
+import { useCurrentUser } from "../../hooks/useCurrentUser";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const { userName, notificationCount } = useCurrentUser();
 
   const handleSelect = (categoryId) => {
     // Route to sub-pages as you build them
@@ -20,7 +22,7 @@ export default function SettingsPage() {
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* ✅ Reused TopBar */}
-        <TopBar userName="John Doe" notificationCount={7} title="Account Settings" />
+        <TopBar userName={userName} notificationCount={notificationCount} title="Account Settings" />
         <div className="bg-white px-6 -mt-px pb-3 border-b border-gray-100">
           <p className="text-[13px] text-gray-400">Manage your account preferences and security.</p>
         </div>

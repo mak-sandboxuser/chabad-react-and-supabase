@@ -1,8 +1,6 @@
-export default function HouseholdHero({
-  familyName = "Doe Family",
-  status = "Active Household",
-  subtitle = "Your household information and members.",
-}) {
+export default function HouseholdHero({ hero }) {
+  const familyName = hero?.name || "My Household";
+  const status = hero?.status ? `${hero.status[0].toUpperCase()}${hero.status.slice(1)} Household` : "Household";
   return (
     <div className="bg-white rounded-2xl border border-gray-100 px-8 py-6 flex items-center justify-between">
       {/* Left: icon + text */}
@@ -20,7 +18,7 @@ export default function HouseholdHero({
               {status}
             </span>
           </div>
-          <p className="text-[13px] text-gray-400">{subtitle}</p>
+          <p className="text-[13px] text-gray-400">Your household information and members.</p>
         </div>
       </div>
 

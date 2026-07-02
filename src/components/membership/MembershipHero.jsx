@@ -1,4 +1,6 @@
-export default function MembershipHero({ name = "Chai Society Membership", status = "Active Member" }) {
+export default function MembershipHero({ hero }) {
+  const name = hero?.membershipName || "Membership";
+  const status = hero?.status ? `${hero.status[0].toUpperCase()}${hero.status.slice(1)} Member` : "Member";
   return (
     <div className="bg-white rounded-2xl border border-gray-100 px-8 py-7 flex items-center justify-between overflow-hidden relative">
       <div className="flex items-center gap-6 relative z-10">

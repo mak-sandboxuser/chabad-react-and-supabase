@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import FormField from "./FormField";
 import PaymentMethodCard from "../payments/PaymentMethodCard";
 
@@ -28,18 +28,26 @@ const contactPrefs = [
   },
 ];
 
-export default function PersonalInfoForm({ onSave, onCancel }) {
-  const [form, setForm] = useState({
-    firstName: "John",
-    lastName: "Doe",
-    email: "john.doe@example.com",
-    mobile: "(914) 234-0000",
-    address: "123 Bedford Road",
-    city: "Bedford",
-    state: "NY",
-    zip: "10506",
+export default function PersonalInfoForm({ initialForm, initialContactPref = "email", onSave, onCancel }) {
+  const [form, setForm] = useState(initialForm || {
+    firstName: "",
+    lastName: "",
+    email: "",
+    mobile: "",
+    address: "",
+    city: "",
+    state: "",
+    zip: "",
   });
-  const [contactPref, setContactPref] = useState("email");
+  const [contactPref, setContactPref] = useState(initialContactPref);
+
+  useEffect(() => {
+    if (initialForm) setForm(initialForm);
+  }, [initialForm]);
+
+  useEffect(() => {
+    if (initialContactPref) setContactPref(initialContactPref);
+  }, [initialContactPref]);
 
   const update = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 

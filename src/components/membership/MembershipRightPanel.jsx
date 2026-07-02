@@ -1,3 +1,5 @@
+import { formatCurrency, formatDate } from "../../lib/format";
+
 const SummaryRow = ({ icon, label, value, valueClass = "text-gray-800" }) => (
   <div className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
     <div className="flex items-center gap-2.5">
@@ -10,10 +12,11 @@ const SummaryRow = ({ icon, label, value, valueClass = "text-gray-800" }) => (
   </div>
 );
 
-export default function MembershipRightPanel() {
+export default function MembershipRightPanel({ panel }) {
+  if (!panel) return null;
+
   return (
     <div className="space-y-5">
-      {/* Active status card */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
         <div className="flex items-start gap-3">
           <div className="w-8 h-8 rounded-full bg-[#dcfce7] flex items-center justify-center shrink-0 mt-0.5">
@@ -30,25 +33,24 @@ export default function MembershipRightPanel() {
         </div>
       </div>
 
-      {/* Membership Summary */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
         <h3 className="text-[14px] font-semibold text-gray-800 mb-1">Membership Summary</h3>
 
         <SummaryRow
           icon="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
           label="Member Since"
-          value="Jan 1, 2024"
+          value={formatDate(panel.memberSince)}
         />
         <SummaryRow
           icon="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"
           label="Membership Tier"
-          value="Chai Society"
+          value={panel.planLabel}
           valueClass="text-[#1a6bdc]"
         />
         <SummaryRow
           icon="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           label="Annual Commitment"
-          value="$1,800.00"
+          value={formatCurrency(panel.annualCommitment)}
         />
         <div className="flex items-center justify-between py-3 border-b border-gray-50">
           <div className="flex items-center gap-2.5">
@@ -58,67 +60,35 @@ export default function MembershipRightPanel() {
             </svg>
             <span className="text-[12px] text-gray-500">Current Status</span>
           </div>
-          <span className="bg-[#dcfce7] text-[#16a34a] text-[11px] font-semibold px-2.5 py-0.5 rounded-full">
-            Active
+          <span className="bg-[#dcfce7] text-[#16a34a] text-[11px] font-semibold px-2.5 py-0.5 rounded-full capitalize">
+            {panel.status}
           </span>
         </div>
         <SummaryRow
           icon="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
           label="Renewal Date"
-          value="Jan 1, 2025"
+          value={formatDate(panel.renewalDate)}
         />
       </div>
 
-      {/* Actions */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-5">
-        <h3 className="text-[14px] font-semibold text-gray-800 mb-3">Actions</h3>
-
-        {/* Primary action */}
-        <button className="w-full flex items-center justify-between gap-3 border border-[#1a2a5e] rounded-xl px-4 py-3.5 hover:bg-[#f4f6fb] transition-colors group mb-2">
-          <div className="flex items-center gap-3">
-            <svg className="w-4 h-4 text-[#1a6bdc] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div className="text-left">
-              <p className="text-[13px] font-semibold text-[#1a2a5e]">View Contribution History</p>
-              <p className="text-[11px] text-gray-400 mt-0.5">See your past contributions and payments</p>
+      {panel.renewalDate && (
+        <div className="bg-[#fff8f0] rounded-2xl border border-[#fed7aa] p-5">
+          <div className="flex items-start gap-3 mb-3">
+            <div className="w-8 h-8 rounded-lg bg-[#ffedd5] flex items-center justify-center shrink-0">
+              <svg className="w-4 h-4 text-[#ea580c]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-[13px] font-bold text-[#ea580c]">Upcoming Renewal</p>
+              <p className="text-[12px] text-gray-600 mt-1 leading-snug">
+                Your membership will renew on {formatDate(panel.renewalDate)}.
+              </p>
             </div>
           </div>
-          <svg className="w-4 h-4 text-[#1a2a5e] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
-          </svg>
-        </button>
-
-        {/* Download */}
-        <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 transition-colors group">
-          <svg className="w-4 h-4 text-[#1a6bdc] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-          </svg>
-          <span className="text-[13px] font-semibold text-[#1a6bdc]">Download Membership Summary</span>
-        </button>
-      </div>
-
-      {/* Upcoming Renewal */}
-      <div className="bg-[#fff8f0] rounded-2xl border border-[#fed7aa] p-5">
-        <div className="flex items-start gap-3 mb-3">
-          <div className="w-8 h-8 rounded-lg bg-[#ffedd5] flex items-center justify-center shrink-0">
-            <svg className="w-4 h-4 text-[#ea580c]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-[13px] font-bold text-[#ea580c]">Upcoming Renewal</p>
-            <p className="text-[12px] text-gray-600 mt-1 leading-snug">
-              Your membership will renew automatically on January 1, 2025.
-            </p>
-          </div>
         </div>
-        <button className="w-full border border-[#ea580c] text-[#ea580c] text-[12px] font-semibold py-2.5 rounded-xl hover:bg-[#ffedd5] transition-colors">
-          Manage Renewal Preferences
-        </button>
-      </div>
+      )}
     </div>
   );
 }

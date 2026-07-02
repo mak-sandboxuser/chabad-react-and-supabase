@@ -4,42 +4,43 @@ import FinancialStatsRow from "./FinancialStatsRow";
 import YearlySummary from "./YearlySummary";
 import RecurringContributions from "./RecurringContributions";
 import FinancialRightPanel from "./FinancialRightPanel";
+import { useCurrentUser } from "../../hooks/useCurrentUser";
+import { useFinancialData } from "../../hooks/usePageData";
 
 export default function FinancialPage() {
+  const { userName, notificationCount } = useCurrentUser();
+  const { loading, error, data } = useFinancialData();
+
   return (
     <div className="flex h-screen bg-[#f4f6fb] overflow-hidden">
-      {/* ✅ Reused — NavLink auto-highlights /financial */}
       <Sidebar />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* ✅ Reused TopBar with subtitle-style title */}
-        <TopBar
-          userName="John Doe"
-          notificationCount={3}
-          title="Financial Overview"
-        />
-        {/* Subtitle line under title (page-specific, not part of TopBar) */}
+        <TopBar userName={userName} notificationCount={notificationCount} title="Financial Overview" />
         <div className="bg-white px-6 -mt-px pb-3 border-b border-gray-100">
           <p className="text-[13px] text-gray-400">View your financial commitments and contribution activity.</p>
         </div>
 
         <div className="flex-1 overflow-y-auto">
           <div className="flex">
-            {/* Main content */}
             <main className="flex-1 p-6 space-y-5 min-w-0">
-              <FinancialStatsRow />
-              <YearlySummary />
-              <RecurringContributions />
+              {loading && <p className="text-sm text-gray-500">Loading financial data...</p>}
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              {data && (
+                <>
+                  <FinancialStatsRow stats={data.stats} />
+                  <YearlySummary summary={data.yearlySummary} monthlyChart={data.monthlyChart} />
+                  <RecurringContributions contributions={data.recurring} />
+                </>
+              )}
             </main>
 
-            {/* Right panel */}
             <aside className="w-[300px] shrink-0 p-5 overflow-y-auto">
-              <FinancialRightPanel />
+              {data && <FinancialRightPanel panel={data.panel} />}
             </aside>
           </div>
         </div>
 
-        {/* Footer */}
         <footer className="px-6 py-3 border-t border-gray-100 bg-white flex items-center justify-between shrink-0">
           <p className="text-[11px] text-gray-400">© 2025 Chabad Bedford. All rights reserved.</p>
           <div className="flex items-center gap-4">

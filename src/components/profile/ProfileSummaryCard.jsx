@@ -1,8 +1,10 @@
+import { formatDate } from "../../lib/format";
+
 export default function ProfileSummaryCard({
-  initials = "JD",
-  name = "John Doe",
-  memberSince = "Jan 15, 2024",
-  status = "Active Member",
+  initials = "M",
+  name = "Member",
+  memberSince,
+  status = "active",
 }) {
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5">
@@ -13,9 +15,9 @@ export default function ProfileSummaryCard({
           <span className="text-[#1a2a5e] text-[20px] font-bold">{initials}</span>
         </div>
         <p className="text-[16px] font-bold text-[#1a2a5e]">{name}</p>
-        <p className="text-[12px] text-gray-400 mt-1">Member since {memberSince}</p>
-        <span className="mt-3 bg-[#dcfce7] text-[#16a34a] text-[11px] font-semibold px-3 py-1 rounded-full">
-          {status}
+        <p className="text-[12px] text-gray-400 mt-1">Member since {formatDate(memberSince)}</p>
+        <span className="mt-3 bg-[#dcfce7] text-[#16a34a] text-[11px] font-semibold px-3 py-1 rounded-full capitalize">
+          {status} Member
         </span>
       </div>
     </div>
