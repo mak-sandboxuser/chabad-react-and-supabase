@@ -12,9 +12,9 @@ import ContributionsPage from "./components/contributions/ContributionsPage";
 import MakePaymentPage from "./components/payments/MakePaymentPage";
 import BillingPortalPage from "./components/billing/BillingPortalPage";
 import NotificationsPage from "./components/notifications/NotificationsPage";
-import ProfilePage from "./components/profile/ProfilePage"
-import SettingsPage from "./components/settings/SettingsPage"
-import HelpSupportPage from "./components/help/HelpPage"
+import ProfilePage from "./components/profile/ProfilePage";
+import SettingsPage from "./components/settings/SettingsPage";
+import HelpPage from "./components/help/HelpPage";
 
 const App = () => {
   return (
@@ -30,11 +30,11 @@ const App = () => {
         <Route path="/financial" element={<FinancialPage />} />
         <Route path="/contributions" element={<ContributionsPage />} />
         <Route path="/payments" element={<MakePaymentPage />} />
-        <Route path="/recurring" element={<BillingPortalPage />} />
+        <Route path="/billing-portal" element={<BillingPortalPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/help" element={<HelpSupportPage />} />
+        <Route path="/help" element={<HelpPage />} />
       </Routes>
     </BrowserRouter>
   );
