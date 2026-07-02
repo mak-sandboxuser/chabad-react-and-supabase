@@ -1,9 +1,22 @@
-export default function ContributionSummary() {
-  const totalCommitment = 3600;
-  const totalContributed = 1950;
-  const outstanding = 1650;
-  const nextAmount = 300;
-  const progress = Math.round((totalContributed / totalCommitment) * 100);
+const currencyFormatter = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  maximumFractionDigits: 0,
+});
+
+export default function ContributionSummary({ summary }) {
+  const totalCommitment = Number(summary?.totalCommitment || 0);
+  const totalContributed = Number(summary?.totalContributed || 0);
+  const outstanding = Number(summary?.outstanding || 0);
+  const nextAmount = Number(summary?.nextAmount || 0);
+  const nextDueDate = summary?.nextDueDate
+    ? new Date(summary.nextDueDate).toLocaleDateString("en-IN", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "No schedule";
+  const progress = totalCommitment ? Math.round((totalContributed / totalCommitment) * 100) : 0;
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-6">
@@ -13,8 +26,8 @@ export default function ContributionSummary() {
         {/* Total Contributed */}
         <div>
           <p className="text-[12px] text-gray-400 font-medium mb-2">Total Contributed (YTD)</p>
-          <p className="text-[22px] font-bold text-[#16a34a] leading-none">${totalContributed.toLocaleString()}.00</p>
-          <p className="text-[11px] text-gray-400 mt-1">of ${totalCommitment.toLocaleString()}.00 commitment</p>
+          <p className="text-[22px] font-bold text-[#16a34a] leading-none">{currencyFormatter.format(totalContributed)}</p>
+          <p className="text-[11px] text-gray-400 mt-1">of {currencyFormatter.format(totalCommitment)} commitment</p>
           {/* Progress bar */}
           <div className="mt-3">
             <div className="w-full bg-gray-100 rounded-full h-2">
@@ -30,8 +43,8 @@ export default function ContributionSummary() {
         {/* Outstanding Balance */}
         <div>
           <p className="text-[12px] text-gray-400 font-medium mb-2">Outstanding Balance</p>
-          <p className="text-[22px] font-bold text-[#e53e3e] leading-none">${outstanding.toLocaleString()}.00</p>
-          <p className="text-[11px] text-gray-400 mt-1">Due by Dec 31, 2025</p>
+          <p className="text-[22px] font-bold text-[#e53e3e] leading-none">{currencyFormatter.format(outstanding)}</p>
+          <p className="text-[11px] text-gray-400 mt-1">Outstanding amount</p>
           <button className="mt-3 w-full bg-[#1a2a5e] hover:bg-[#243672] text-white text-[12px] font-semibold py-2.5 rounded-xl transition-colors">
             Make Payment
           </button>
@@ -40,12 +53,9 @@ export default function ContributionSummary() {
         {/* Next Scheduled */}
         <div>
           <p className="text-[12px] text-gray-400 font-medium mb-2">Next Scheduled Contribution</p>
-          <p className="text-[22px] font-bold text-[#1a2a5e] leading-none">${nextAmount.toLocaleString()}.00</p>
+          <p className="text-[22px] font-bold text-[#1a2a5e] leading-none">{currencyFormatter.format(nextAmount)}</p>
           <div className="flex items-center gap-2 mt-1">
-            <p className="text-[11px] text-gray-400">May 15, 2025</p>
-            <span className="bg-[#dcfce7] text-[#16a34a] text-[10px] font-semibold px-2 py-0.5 rounded-full">
-              In 12 days
-            </span>
+            <p className="text-[11px] text-gray-400">{nextDueDate}</p>
           </div>
           <button className="mt-3 w-full border border-gray-200 hover:border-gray-300 text-[#1a2a5e] text-[12px] font-semibold py-2.5 rounded-xl transition-colors">
             Manage Billing

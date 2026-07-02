@@ -1,11 +1,11 @@
-const payments = [
+const defaultPayments = [
   { date: "Apr 15, 2025", description: "Monthly Contribution", amount: "$300.00", status: "Paid" },
   { date: "Mar 15, 2025", description: "Monthly Contribution", amount: "$300.00", status: "Paid" },
   { date: "Feb 15, 2025", description: "Monthly Contribution", amount: "$300.00", status: "Paid" },
   { date: "Jan 15, 2025", description: "Annual Membership", amount: "$3,600.00", status: "Paid" },
 ];
 
-export default function RecentPayments() {
+export default function RecentPayments({ payments = defaultPayments }) {
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5">
       <div className="flex items-center justify-between mb-4">
@@ -34,6 +34,13 @@ export default function RecentPayments() {
               </td>
             </tr>
           ))}
+          {!payments.length && (
+            <tr>
+              <td colSpan={4} className="py-4 text-center text-[12px] text-gray-400">
+                No payments yet.
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
 

@@ -2,12 +2,19 @@ import { useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useNavigate } from "react-router-dom";
 
+const MEMBERSHIP_PLANS = [
+  { id: "basic", name: "Basic", priceLabel: "₹999/year" },
+  { id: "standard", name: "Standard", priceLabel: "₹2,499/year" },
+  { id: "premium", name: "Premium", priceLabel: "₹4,999/year" },
+];
+
 export default function SignUpForm() {
   const navigate = useNavigate();
 
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [selectedPlan, setSelectedPlan] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -15,12 +22,12 @@ export default function SignUpForm() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!email || !password || !confirmPassword) {
+    if (!fullName || !email || !password) {
       return alert("Please fill all fields.");
     }
 
-    if (password !== confirmPassword) {
-      return alert("Passwords do not match.");
+    if (!selectedPlan) {
+      return alert("Please choose a membership plan.");
     }
 
     setLoading(true);
@@ -28,11 +35,13 @@ export default function SignUpForm() {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          full_name: fullName,
+          membership_plan: selectedPlan,
+        },
+      },
     });
-
-
-console.log(data);
-console.log(error);
 
     setLoading(false);
 
@@ -40,9 +49,6 @@ console.log(error);
       return alert(error.message);
     }
 
-    console.log(data);
-
-    
     setSuccess(true);
     navigate("/dashboard");
   };
@@ -88,6 +94,22 @@ console.log(error);
 
   return (
     <div className="space-y-5">
+      {/* Full Name */}
+      <div className="space-y-1.5">
+        <label className="block text-sm font-semibold text-gray-700">
+          Full Name
+        </label>
+
+        <input
+          type="text"
+          placeholder="Your full name"
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          className="w-full px-4 py-3 border rounded-xl border-gray-200 text-sm
+          focus:outline-none focus:ring-2 focus:ring-[#1a2a5e]/20"
+        />
+      </div>
+
       {/* Email */}
       <div className="space-y-1.5">
         <label className="block text-sm font-semibold text-gray-700">
@@ -120,20 +142,31 @@ console.log(error);
         />
       </div>
 
-      {/* Confirm Password */}
-      <div className="space-y-1.5">
+      {/* Membership Plan */}
+      <div className="space-y-2">
         <label className="block text-sm font-semibold text-gray-700">
-          Confirm Password
+          Membership Plan
         </label>
-
-        <input
-          type="password"
-          placeholder="Confirm password"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-          className="w-full px-4 py-3 border rounded-xl border-gray-200 text-sm
-          focus:outline-none focus:ring-2 focus:ring-[#1a2a5e]/20"
-        />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          {MEMBERSHIP_PLANS.map((plan) => {
+            const isSelected = selectedPlan === plan.id;
+            return (
+              <button
+                key={plan.id}
+                type="button"
+                onClick={() => setSelectedPlan(plan.id)}
+                className={`rounded-xl border px-3 py-3 text-left transition ${
+                  isSelected
+                    ? "border-[#1a2a5e] bg-[#eef1f9]"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                <p className="text-[13px] font-semibold text-gray-800">{plan.name}</p>
+                <p className="text-xs text-gray-500 mt-1">{plan.priceLabel}</p>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Button */}

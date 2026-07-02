@@ -1,4 +1,4 @@
-const stats = [
+const defaultStats = [
   {
     icon: "M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z",
     label: "Membership Tier",
@@ -30,7 +30,15 @@ const stats = [
   },
 ];
 
-export default function StatsRow() {
+export default function StatsRow({ stats = defaultStats }) {
+  if (!stats.length) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-100 px-4 py-4 text-sm text-gray-500">
+        No dashboard stats yet.
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-4 gap-4">
       {stats.map((stat) => (

@@ -1,4 +1,4 @@
-const notifications = [
+const defaultNotifications = [
   {
     icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
     iconBg: "bg-[#dcfce7]",
@@ -33,7 +33,17 @@ const notifications = [
   },
 ];
 
-export default function NotificationsPanel() {
+const notificationTypeStyles = {
+  success: { iconBg: "bg-[#dcfce7]", iconColor: "text-[#16a34a]" },
+  info: { iconBg: "bg-[#dbeafe]", iconColor: "text-[#1a6bdc]" },
+  warning: { iconBg: "bg-[#fef9c3]", iconColor: "text-[#ca8a04]" },
+  household: { iconBg: "bg-[#ede9fe]", iconColor: "text-[#7c3aed]" },
+};
+
+const defaultInfoIcon =
+  "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z";
+
+export default function NotificationsPanel({ notifications = defaultNotifications }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -42,11 +52,13 @@ export default function NotificationsPanel() {
       </div>
 
       <div className="space-y-4">
-        {notifications.map((n, i) => (
+        {notifications.map((n, i) => {
+          const style = notificationTypeStyles[n.type] || notificationTypeStyles.info;
+          return (
           <div key={i} className="flex items-start gap-3">
-            <div className={`w-8 h-8 rounded-full ${n.iconBg} flex items-center justify-center shrink-0 mt-0.5`}>
-              <svg className={`w-4 h-4 ${n.iconColor}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                <path strokeLinecap="round" strokeLinejoin="round" d={n.icon} />
+            <div className={`w-8 h-8 rounded-full ${n.iconBg || style.iconBg} flex items-center justify-center shrink-0 mt-0.5`}>
+              <svg className={`w-4 h-4 ${n.iconColor || style.iconColor}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d={n.icon || defaultInfoIcon} />
               </svg>
             </div>
             <div className="flex-1 min-w-0">
@@ -57,7 +69,10 @@ export default function NotificationsPanel() {
               <p className="text-[11px] text-gray-500 leading-snug mt-0.5">{n.body}</p>
             </div>
           </div>
-        ))}
+        )})}
+        {!notifications.length && (
+          <p className="text-[12px] text-gray-400">No notifications yet.</p>
+        )}
       </div>
 
       <div className="mt-4 pt-3 border-t border-gray-100 text-center">
