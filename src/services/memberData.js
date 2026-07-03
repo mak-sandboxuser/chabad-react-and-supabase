@@ -217,7 +217,14 @@ export async function markAllNotificationsRead(userId) {
 }
 
 function getDisplayName(profile, user) {
-  return profile?.full_name || user?.user_metadata?.full_name || user?.email || "Member";
+  const metadata = user?.user_metadata || {};
+  return (
+    profile?.full_name ||
+    metadata.full_name ||
+    metadata.name ||
+    user?.email?.split("@")[0] ||
+    "Member"
+  );
 }
 
 function getCommitment(membership) {

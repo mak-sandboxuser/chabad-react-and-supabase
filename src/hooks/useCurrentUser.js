@@ -12,7 +12,7 @@ export function useCurrentUser() {
         const user = await getAuthUser();
         const [profile, notifications] = await Promise.all([
           fetchProfile(user.id),
-          fetchNotifications(user.id),
+          fetchNotifications(user.id).catch(() => []),
         ]);
         setData(buildCurrentUserData(profile, user, notifications));
       } catch (err) {

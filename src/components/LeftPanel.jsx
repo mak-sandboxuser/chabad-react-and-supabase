@@ -45,7 +45,7 @@ export default function LeftPanel() {
     <div className="flex flex-col justify-between h-full py-2">
       <div className="space-y-10">
         {/* Logo */}
-        {/* <ChabadLogo size="md" /> */}
+        <ChabadLogo size="md" />
 
         {/* Headline */}
         <div className="space-y-3">

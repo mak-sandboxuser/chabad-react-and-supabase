@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import ChabadLogo from "../ChabadLogo";
 
 const navItems = [
   { id: "dashboard",     label: "Dashboard",              path: "/dashboard",     icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
@@ -19,21 +20,7 @@ export default function Sidebar() {
     <aside className="w-[220px] shrink-0 bg-white border-r border-gray-100 flex flex-col h-screen sticky top-0">
       {/* Logo */}
       <div className="px-5 py-5 border-b border-gray-100">
-        <div className="flex items-center gap-2">
-          <svg width="32" height="32" viewBox="0 0 56 56" fill="none">
-            <path d="M28 10 L28 42" stroke="#1a2a5e" strokeWidth="2.5" strokeLinecap="round"/>
-            <path d="M28 20 Q20 20 18 11" stroke="#1a2a5e" strokeWidth="2" strokeLinecap="round" fill="none"/>
-            <path d="M28 26 Q15 26 13 15" stroke="#1a2a5e" strokeWidth="2" strokeLinecap="round" fill="none"/>
-            <path d="M28 20 Q36 20 38 11" stroke="#1a2a5e" strokeWidth="2" strokeLinecap="round" fill="none"/>
-            <path d="M28 26 Q41 26 43 15" stroke="#1a2a5e" strokeWidth="2" strokeLinecap="round" fill="none"/>
-            <path d="M20 42 L36 42" stroke="#1a2a5e" strokeWidth="2.5" strokeLinecap="round"/>
-            <path d="M23 46 L33 46" stroke="#1a2a5e" strokeWidth="2" strokeLinecap="round"/>
-          </svg>
-          <div>
-            <div className="text-[11px] font-bold tracking-[0.18em] text-[#1a2a5e] leading-none">CHABAD</div>
-            <div className="text-[8px] font-normal tracking-[0.25em] text-[#1a2a5e] leading-none mt-0.5">BEDFORD</div>
-          </div>
-        </div>
+        <ChabadLogo size="sm" />
       </div>
 
       {/* Nav */}

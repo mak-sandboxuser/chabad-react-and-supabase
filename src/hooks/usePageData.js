@@ -18,6 +18,7 @@ import {
   fetchPaymentMethods,
   fetchPayments,
   fetchProfile,
+  fetchNotifications,
   fetchRecurringContributions,
   getAuthUser,
 } from "../services/memberData";
@@ -61,7 +62,7 @@ export function useDashboardData() {
       fetchPayments(userId, 5),
       fetchContributions(userId),
       fetchHouseholdMembers(userId),
-      fetchNotifications(userId),
+      fetchNotifications(userId).catch(() => []),
     ]);
     return buildDashboardData({ profile, user, membership, payments, contributions, householdMembers, notifications });
   });
