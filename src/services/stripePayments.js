@@ -6,6 +6,7 @@ export async function createStripeCheckoutSession({
   notes = "",
   contributionType = "monthly",
   billingRecordId = null,
+  autoPay = false,
 }) {
   const { data, error } = await supabase.functions.invoke("create-checkout-session", {
     body: {
@@ -14,6 +15,7 @@ export async function createStripeCheckoutSession({
       notes,
       contributionType,
       billingRecordId,
+      autoPay,
     },
   });
 
@@ -46,6 +48,26 @@ export async function verifyStripeCheckoutSession(sessionId) {
 
   if (data?.error) {
     throw new Error(data.error);
+  }
+
+  return data;
+}
+
+export async function createBillingPortalSession() {
+  const { data, error } = await supabase.functions.invoke("create-billing-portal", {
+    body: {},
+  });
+
+  if (error) {
+    throw new Error(error.message || "Failed to open billing portal.");
+  }
+
+  if (data?.error) {
+    throw new Error(data.error);
+  }
+
+  if (!data?.url) {
+    throw new Error("Billing portal URL was not returned. Deploy the create-billing-portal Edge Function.");
   }
 
   return data;

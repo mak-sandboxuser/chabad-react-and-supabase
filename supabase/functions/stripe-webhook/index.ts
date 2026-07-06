@@ -1,15 +1,86 @@
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
+const AUTO_PAY_DAY = 5;
+
+async function activateAutoPay(
+  supabase: ReturnType<typeof createClient>,
+  stripe: Stripe,
+  session: Stripe.Checkout.Session,
+) {
+  const userId = session.metadata?.user_id;
+  const subscriptionId =
+    typeof session.subscription === "string"
+      ? session.subscription
+      : session.subscription?.id;
+
+  if (!userId || !subscriptionId) {
+    return new Response("Missing subscription information.", { status: 400 });
+  }
+
+  const sub = await stripe.subscriptions.retrieve(subscriptionId);
+  const amount = (sub.items.data[0]?.price?.unit_amount || 0) / 100;
+  const nextCharge = new Date(sub.current_period_end * 1000).toISOString().slice(0, 10);
+
+  await supabase
+    .from("recurring_contributions")
+    .update({ status: "cancelled" })
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .not("stripe_subscription_id", "is", null);
+
+  await supabase.from("recurring_contributions").insert({
+    user_id: userId,
+    description: "Monthly Membership Auto-Pay (5th of each month)",
+    amount,
+    frequency: "monthly",
+    next_charge_date: nextCharge,
+    status: "active",
+    stripe_subscription_id: subscriptionId,
+    charge_day_of_month: AUTO_PAY_DAY,
+  });
+
+  await supabase
+    .from("memberships")
+    .update({ stripe_subscription_id: subscriptionId, billing_status: "active", status: "active" })
+    .eq("user_id", userId);
+
+  const { data: existing } = await supabase
+    .from("notifications")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("title", "Auto-Pay Enabled")
+    .gte("created_at", new Date(Date.now() - 60000).toISOString())
+    .maybeSingle();
+
+  if (!existing) {
+    await supabase.from("notifications").insert({
+      user_id: userId,
+      title: "Auto-Pay Enabled",
+      body: `Your monthly contribution of ₹${amount.toLocaleString("en-IN")} will be charged automatically on the ${AUTO_PAY_DAY}th of each month.`,
+      type: "payment",
+    });
+  }
+
+  return new Response(JSON.stringify({ received: true }), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 async function recordCompletedSession(
   supabase: ReturnType<typeof createClient>,
   session: Stripe.Checkout.Session,
+  stripe: Stripe,
 ) {
   const userId = session.metadata?.user_id;
   const referenceNumber = session.id;
 
   if (!userId) {
     return new Response("Missing user_id in session metadata.", { status: 400 });
+  }
+
+  if (session.mode === "subscription") {
+    return activateAutoPay(supabase, stripe, session);
   }
 
   const { data: existing } = await supabase
@@ -85,6 +156,119 @@ async function recordCompletedSession(
   });
 }
 
+async function recordInvoicePaid(
+  supabase: ReturnType<typeof createClient>,
+  stripe: Stripe,
+  invoice: Stripe.Invoice,
+) {
+  const subscriptionId =
+    typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id;
+
+  if (!subscriptionId || invoice.amount_paid === 0) {
+    return new Response(JSON.stringify({ received: true }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const sub = await stripe.subscriptions.retrieve(subscriptionId);
+  const userId = sub.metadata?.user_id;
+  if (!userId) {
+    return new Response("Missing user_id on subscription.", { status: 400 });
+  }
+
+  const referenceNumber = invoice.id;
+  const { data: existing } = await supabase
+    .from("payments")
+    .select("id")
+    .eq("reference_number", referenceNumber)
+    .maybeSingle();
+
+  if (existing) {
+    return new Response(JSON.stringify({ received: true }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const amount = (invoice.amount_paid || 0) / 100;
+  const paidAt = invoice.status_transitions?.paid_at
+    ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
+    : new Date().toISOString();
+
+  const { data: pendingBill } = await supabase
+    .from("membership_billing_records")
+    .select("id")
+    .eq("user_id", userId)
+    .in("status", ["pending", "overdue"])
+    .order("billing_period", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (pendingBill?.id) {
+    await supabase.rpc("complete_membership_payment", {
+      p_billing_record_id: pendingBill.id,
+      p_payment_method: "card",
+      p_payment_method_label: "Stripe Auto-Pay",
+      p_reference_number: referenceNumber,
+      p_paid_at: paidAt,
+      p_paid_amount: amount,
+    });
+  } else {
+    await supabase.from("payments").insert({
+      user_id: userId,
+      amount,
+      description: "Monthly Membership Auto-Pay",
+      status: "paid",
+      payment_method: "card",
+      payment_method_label: "Stripe Auto-Pay",
+      reference_number: referenceNumber,
+      contribution_type: "monthly",
+      paid_at: paidAt,
+    });
+  }
+
+  const nextCharge = new Date(sub.current_period_end * 1000).toISOString().slice(0, 10);
+  await supabase
+    .from("recurring_contributions")
+    .update({ next_charge_date: nextCharge, amount, status: "active" })
+    .eq("stripe_subscription_id", subscriptionId);
+
+  await supabase.from("notifications").insert({
+    user_id: userId,
+    title: "Auto-Pay Successful",
+    body: `Your monthly contribution of ₹${amount.toLocaleString("en-IN")} was charged automatically.`,
+    type: "payment",
+  });
+
+  return new Response(JSON.stringify({ received: true }), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function handleSubscriptionCancelled(
+  supabase: ReturnType<typeof createClient>,
+  subscription: Stripe.Subscription,
+) {
+  const subscriptionId = subscription.id;
+  await supabase
+    .from("recurring_contributions")
+    .update({ status: "cancelled" })
+    .eq("stripe_subscription_id", subscriptionId);
+
+  const userId = subscription.metadata?.user_id;
+  if (userId) {
+    await supabase.from("notifications").insert({
+      user_id: userId,
+      title: "Auto-Pay Cancelled",
+      body: "Your automatic monthly payment has been cancelled. You can re-enable it from the Payments page.",
+      type: "payment",
+    });
+  }
+
+  return new Response(JSON.stringify({ received: true }), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 Deno.serve(async (req) => {
   const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
   const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
@@ -115,7 +299,17 @@ Deno.serve(async (req) => {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    return await recordCompletedSession(supabase, session);
+    return await recordCompletedSession(supabase, session, stripe);
+  }
+
+  if (event.type === "invoice.paid") {
+    const invoice = event.data.object as Stripe.Invoice;
+    return await recordInvoicePaid(supabase, stripe, invoice);
+  }
+
+  if (event.type === "customer.subscription.deleted") {
+    const subscription = event.data.object as Stripe.Subscription;
+    return await handleSubscriptionCancelled(supabase, subscription);
   }
 
   return new Response(JSON.stringify({ received: true }), {

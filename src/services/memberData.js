@@ -288,14 +288,21 @@ export function buildCurrentUserData(profile, user, notifications) {
   return { userName: displayName, notificationCount: unreadCount, profile, user };
 }
 
-export function buildDashboardData({ profile, user, membership, payments, contributions, householdMembers, notifications }) {
+export function buildDashboardData({ profile, user, membership, payments, contributions, householdMembers, notifications, recurring = [] }) {
   const displayName = getDisplayName(profile, user);
   const commitment = getCommitment(membership);
   const paidTotal = getPaidTotal(contributions, payments);
+  const activeAutoPay = recurring.find(
+    (item) => item.status === "active" && item.stripe_subscription_id,
+  );
   const nextContribution = contributions
     .filter((item) => item.status !== "paid" && item.due_date)
     .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))[0];
   const unreadCount = notifications.filter((n) => !n.is_read).length;
+  const nextAmount = activeAutoPay
+    ? Number(activeAutoPay.amount)
+    : Number(nextContribution?.amount || getMonthlyAmount(membership));
+  const nextDueDate = activeAutoPay?.next_charge_date || nextContribution?.due_date || null;
 
   return {
     userName: displayName,
@@ -326,8 +333,10 @@ export function buildDashboardData({ profile, user, membership, payments, contri
       totalCommitment: commitment,
       totalContributed: paidTotal,
       outstanding: Math.max(commitment - paidTotal, 0),
-      nextAmount: Number(nextContribution?.amount || getMonthlyAmount(membership)),
-      nextDueDate: nextContribution?.due_date || null,
+      nextAmount,
+      nextDueDate,
+      autoPayEnabled: Boolean(activeAutoPay),
+      autoPayDay: activeAutoPay?.charge_day_of_month || 5,
     },
     recentPayments: payments.slice(0, 5).map((item) => ({
       date: formatShortDate(item.paid_at),
@@ -617,7 +626,7 @@ export async function fetchAllMemberData() {
     userSettings,
     supportConfig,
     currentUser: buildCurrentUserData(profile, user, notifications),
-    dashboard: buildDashboardData({ profile, user, membership, payments, contributions, householdMembers, notifications }),
+    dashboard: buildDashboardData({ profile, user, membership, payments, contributions, householdMembers, notifications, recurring }),
     membershipPage: buildMembershipData({ membership }),
     householdPage: buildHouseholdData({ profile, household, members: householdMembers }),
     financial: buildFinancialData({ membership, contributions, payments, recurring, paymentMethods, billingContact }),

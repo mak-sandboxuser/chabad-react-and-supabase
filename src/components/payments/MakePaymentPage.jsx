@@ -31,10 +31,12 @@ export default function MakePaymentPage() {
     loading: false,
     verified: false,
     amount: null,
+    autoPay: false,
     error: "",
   });
 
   const success = searchParams.get("success") === "true";
+  const subscriptionSuccess = searchParams.get("subscription") === "success";
   const canceled = searchParams.get("canceled") === "true";
   const sessionId = searchParams.get("session_id");
 
@@ -79,44 +81,51 @@ export default function MakePaymentPage() {
   const verifiedSessionRef = useRef(null);
 
   const runVerification = async (id) => {
-    setVerifyState({ loading: true, verified: false, amount: null, error: "" });
+    setVerifyState({ loading: true, verified: false, amount: null, autoPay: false, error: "" });
     try {
       const result = await verifyStripeCheckoutSession(id);
       setVerifyState({
         loading: false,
         verified: true,
         amount: result.amount,
+        autoPay: Boolean(result.autoPay),
         error: "",
       });
       setPaymentData((prev) => ({
         ...prev,
         amount: String(result.amount),
-        contributionType: "Membership Contribution (Paid)",
+        contributionType: result.autoPay
+          ? "Auto-Pay Enabled (5th of each month)"
+          : "Membership Contribution (Paid)",
       }));
     } catch (err) {
       setVerifyState({
         loading: false,
         verified: false,
         amount: null,
+        autoPay: false,
         error: err.message || "Payment verification failed.",
       });
     }
   };
 
   useEffect(() => {
-    if (!success || !sessionId) return;
+    if ((!success && !subscriptionSuccess) || !sessionId) return;
     if (verifiedSessionRef.current === sessionId) return;
     verifiedSessionRef.current = sessionId;
     runVerification(sessionId);
-  }, [success, sessionId]);
+  }, [success, subscriptionSuccess, sessionId]);
 
-  const handlePayWithStripe = async ({ amount, description, notes, contributionType }) => {
+  const handlePayWithStripe = async ({ amount, description, notes, contributionType, autoPay }) => {
     setPaying(true);
     try {
       setPaymentData({
         amount: String(amount),
-        contributionType:
-          contributionType === "monthly" ? "Monthly Membership" : "One-time Contribution",
+        contributionType: autoPay
+          ? "Auto-Pay (5th of each month)"
+          : contributionType === "monthly"
+            ? "Monthly Membership"
+            : "One-time Contribution",
       });
 
       const { url } = await createStripeCheckoutSession({
@@ -124,7 +133,8 @@ export default function MakePaymentPage() {
         description,
         notes,
         contributionType,
-        billingRecordId,
+        billingRecordId: autoPay ? null : billingRecordId,
+        autoPay,
       });
 
       window.location.href = url;
@@ -135,7 +145,7 @@ export default function MakePaymentPage() {
 
   const dismissStatus = () => {
     setSearchParams({});
-    setVerifyState({ loading: false, verified: false, amount: null, error: "" });
+    setVerifyState({ loading: false, verified: false, amount: null, autoPay: false, error: "" });
   };
 
   const summaryAmount =
@@ -158,17 +168,21 @@ export default function MakePaymentPage() {
         <div className="flex-1 overflow-y-auto">
           <div className="flex">
             <main className="flex-1 p-6 space-y-5 min-w-0">
-              {success && verifyState.loading && (
+              {(success || subscriptionSuccess) && verifyState.loading && (
                 <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-[13px] text-blue-800">
                   Confirming your payment with Stripe...
                 </div>
               )}
 
-              {success && verifyState.verified && (
+              {(success || subscriptionSuccess) && verifyState.verified && (
                 <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-4">
-                  <p className="text-[14px] font-semibold text-green-800">Payment complete</p>
+                  <p className="text-[14px] font-semibold text-green-800">
+                    {verifyState.autoPay ? "Auto-pay enabled" : "Payment complete"}
+                  </p>
                   <p className="text-[13px] text-green-700 mt-1">
-                    {formatCurrency(verifyState.amount)} was recorded successfully. Your dashboard is updated.
+                    {verifyState.autoPay
+                      ? `${formatCurrency(verifyState.amount)} will be charged automatically on the 5th of each month.`
+                      : `${formatCurrency(verifyState.amount)} was recorded successfully. Your dashboard is updated.`}
                   </p>
                   <div className="flex items-center gap-3 mt-3">
                     <Link
@@ -184,7 +198,7 @@ export default function MakePaymentPage() {
                 </div>
               )}
 
-              {success && verifyState.error && (
+              {(success || subscriptionSuccess) && verifyState.error && (
                 <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">
                   {verifyState.error}
                   <p className="mt-2 text-[12px]">
@@ -215,7 +229,7 @@ export default function MakePaymentPage() {
                 </div>
               )}
 
-              {!success && (
+              {!success && !subscriptionSuccess && (
                 <>
                   <PaymentStepper currentStep={1} />
                   <EncouragementBanner />

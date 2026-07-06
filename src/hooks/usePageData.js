@@ -22,6 +22,7 @@ import {
   fetchRecurringContributions,
   getAuthUser,
 } from "../services/memberData";
+import { createBillingPortalSession } from "../services/stripePayments";
 
 function useAsyncData(loadFn, deps = []) {
   const [loading, setLoading] = useState(true);
@@ -56,13 +57,14 @@ export function useDashboardData() {
   const { loading, error, data, refetch } = useAsyncData(async () => {
     const user = await getAuthUser();
     const userId = user.id;
-    const [profile, membership, allPayments, contributions, householdMembers, notifications] = await Promise.all([
+    const [profile, membership, allPayments, contributions, householdMembers, notifications, recurring] = await Promise.all([
       fetchProfile(userId),
       fetchMembership(userId),
       fetchPayments(userId),
       fetchContributions(userId),
       fetchHouseholdMembers(userId),
       fetchNotifications(userId).catch(() => []),
+      fetchRecurringContributions(userId).catch(() => []),
     ]);
     return buildDashboardData({
       profile,
@@ -72,6 +74,7 @@ export function useDashboardData() {
       contributions,
       householdMembers,
       notifications,
+      recurring,
     });
   });
 
@@ -79,7 +82,7 @@ export function useDashboardData() {
     userName: "Member",
     notificationCount: 0,
     stats: [],
-    contributionSummary: { totalCommitment: 0, totalContributed: 0, outstanding: 0, nextAmount: 0, nextDueDate: null },
+    contributionSummary: { totalCommitment: 0, totalContributed: 0, outstanding: 0, nextAmount: 0, nextDueDate: null, autoPayEnabled: false, autoPayDay: 5 },
     recentPayments: [],
     householdMembers: [],
     notifications: [],
@@ -165,8 +168,8 @@ export function useNotificationsData() {
 
 export function useBillingData() {
   return useAsyncData(async () => {
-    const all = await fetchAllMemberData();
-    return { billingPortalUrl: all.billingPortalUrl };
+    const { url } = await createBillingPortalSession();
+    return { billingPortalUrl: url };
   });
 }
 
