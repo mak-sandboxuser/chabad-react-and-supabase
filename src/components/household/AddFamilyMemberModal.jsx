@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import FormField from "../profile/FormField";
 
-const RELATIONSHIPS = ["Spouse", "Child", "Parent", "Sibling", "Other"];
+const BASE_RELATIONSHIPS = ["Spouse", "Child", "Parent", "Sibling", "Other"];
 
 const emptyForm = {
   fullName: "",
@@ -11,11 +11,34 @@ const emptyForm = {
   phone: "",
 };
 
-export default function AddFamilyMemberModal({ open, onClose, onSubmit, saving }) {
+export default function AddFamilyMemberModal({
+  open,
+  onClose,
+  onSubmit,
+  saving,
+  mode = "add",
+  initialData = null,
+}) {
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
+  const isEdit = mode === "edit";
+
+  useEffect(() => {
+    if (!open) return;
+    if (isEdit && initialData) {
+      setForm({ ...emptyForm, ...initialData });
+    } else {
+      setForm(emptyForm);
+    }
+    setError("");
+  }, [open, isEdit, initialData]);
 
   if (!open) return null;
+
+  const relationships =
+    isEdit && form.relationship === "Self"
+      ? ["Self", ...BASE_RELATIONSHIPS]
+      : BASE_RELATIONSHIPS;
 
   const update = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
@@ -39,7 +62,7 @@ export default function AddFamilyMemberModal({ open, onClose, onSubmit, saving }
       setForm(emptyForm);
       onClose();
     } catch (err) {
-      setError(err.message || "Failed to add family member.");
+      setError(err.message || `Failed to ${isEdit ? "update" : "add"} family member.`);
     }
   };
 
@@ -55,8 +78,12 @@ export default function AddFamilyMemberModal({ open, onClose, onSubmit, saving }
       <div className="relative bg-white rounded-2xl border border-gray-100 shadow-xl w-full max-w-lg p-6">
         <div className="flex items-start justify-between mb-5">
           <div>
-            <h2 className="text-[18px] font-bold text-[#1a2a5e]">Add Family Member</h2>
-            <p className="text-[13px] text-gray-400 mt-0.5">Add a person to your household.</p>
+            <h2 className="text-[18px] font-bold text-[#1a2a5e]">
+              {isEdit ? "Edit Family Member" : "Add Family Member"}
+            </h2>
+            <p className="text-[13px] text-gray-400 mt-0.5">
+              {isEdit ? "Update this household member's details." : "Add a person to your household."}
+            </p>
           </div>
           <button
             type="button"
@@ -87,7 +114,7 @@ export default function AddFamilyMemberModal({ open, onClose, onSubmit, saving }
               onChange={update("relationship")}
               className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-[13px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#1a2a5e]/15"
             >
-              {RELATIONSHIPS.map((r) => (
+              {relationships.map((r) => (
                 <option key={r} value={r}>{r}</option>
               ))}
             </select>
@@ -134,7 +161,7 @@ export default function AddFamilyMemberModal({ open, onClose, onSubmit, saving }
               disabled={saving}
               className="bg-[#1a2a5e] hover:bg-[#243672] disabled:opacity-50 text-white text-[13px] font-semibold px-5 py-2.5 rounded-xl"
             >
-              {saving ? "Adding..." : "Add Member"}
+              {saving ? (isEdit ? "Saving..." : "Adding...") : (isEdit ? "Save Changes" : "Add Member")}
             </button>
           </div>
         </form>

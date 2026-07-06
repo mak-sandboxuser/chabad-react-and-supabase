@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+
 const currencyFormatter = new Intl.NumberFormat("en-IN", {
   style: "currency",
   currency: "INR",
@@ -45,9 +47,12 @@ export default function ContributionSummary({ summary }) {
           <p className="text-[12px] text-gray-400 font-medium mb-2">Outstanding Balance</p>
           <p className="text-[22px] font-bold text-[#e53e3e] leading-none">{currencyFormatter.format(outstanding)}</p>
           <p className="text-[11px] text-gray-400 mt-1">Outstanding amount</p>
-          <button className="mt-3 w-full bg-[#1a2a5e] hover:bg-[#243672] text-white text-[12px] font-semibold py-2.5 rounded-xl transition-colors">
+          <Link
+            to="/payments"
+            className="mt-3 w-full inline-flex justify-center bg-[#1a2a5e] hover:bg-[#243672] text-white text-[12px] font-semibold py-2.5 rounded-xl transition-colors"
+          >
             Make Payment
-          </button>
+          </Link>
         </div>
 
         {/* Next Scheduled */}

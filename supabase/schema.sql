@@ -218,6 +218,10 @@ create table if not exists public.notifications (
   created_at timestamptz not null default now()
 );
 
+alter table public.notifications drop constraint if exists notifications_type_check;
+alter table public.notifications add constraint notifications_type_check
+  check (type in ('info', 'success', 'warning', 'household', 'payment', 'system'));
+
 -- ============================================================
 -- USER SETTINGS
 -- ============================================================

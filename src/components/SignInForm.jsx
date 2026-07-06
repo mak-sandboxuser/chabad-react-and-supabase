@@ -146,8 +146,8 @@ console.log(error);
 
       {/* Support link */}
       <div className="text-center space-y-1">
-        <Link to="/signup" className="text-sm text-[#1a6bdc] font-medium hover:underline">
-          SingUp
+        <Link to="/signup" className="text-sm text-[#1a6bdc] hover:underline">
+         You don't have an account? Sign Up
         </Link>
       </div>
     </div>

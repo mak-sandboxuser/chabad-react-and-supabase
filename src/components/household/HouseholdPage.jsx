@@ -8,27 +8,79 @@ import HouseholdRightPanel from "./HouseholdRightPanel";
 import AddFamilyMemberModal from "./AddFamilyMemberModal";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useHouseholdData } from "../../hooks/usePageData";
-import { addHouseholdMember, ensureHousehold, fetchProfile, getAuthUser } from "../../services/memberData";
+import {
+  addHouseholdMember,
+  deleteHouseholdMember,
+  ensureHousehold,
+  fetchProfile,
+  getAuthUser,
+  updateHouseholdMember,
+} from "../../services/memberData";
 
 export default function HouseholdPage() {
   const { userName, notificationCount } = useCurrentUser();
   const { loading, error, data, refetch } = useHouseholdData();
   const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState("add");
+  const [editingMember, setEditingMember] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [actionError, setActionError] = useState("");
 
-  const handleAddMember = async (form) => {
+  const openAddModal = () => {
+    setModalMode("add");
+    setEditingMember(null);
+    setModalOpen(true);
+  };
+
+  const openEditModal = (member) => {
+    setModalMode("edit");
+    setEditingMember({
+      id: member.id,
+      fullName: member.name,
+      relationship: member.relationship,
+      dateOfBirth: member.dateOfBirth,
+      email: member.email,
+      phone: member.phone,
+    });
+    setModalOpen(true);
+  };
+
+  const handleSaveMember = async (form) => {
     setSaving(true);
+    setActionError("");
     try {
       const user = await getAuthUser();
-      const profile = await fetchProfile(user.id);
-      const household = data?.householdId
-        ? { id: data.householdId }
-        : await ensureHousehold(user.id, profile);
 
-      await addHouseholdMember(user.id, household.id, form);
+      if (modalMode === "edit" && editingMember?.id) {
+        await updateHouseholdMember(user.id, editingMember.id, form);
+      } else {
+        const profile = await fetchProfile(user.id);
+        const household = data?.householdId
+          ? { id: data.householdId }
+          : await ensureHousehold(user.id, profile);
+        await addHouseholdMember(user.id, household.id, form);
+      }
+
       refetch();
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteMember = async (member) => {
+    if (!window.confirm(`Remove ${member.name} from your household?`)) return;
+
+    setDeletingId(member.id);
+    setActionError("");
+    try {
+      const user = await getAuthUser();
+      await deleteHouseholdMember(user.id, member.id);
+      refetch();
+    } catch (err) {
+      setActionError(err.message || "Failed to delete family member.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -52,13 +104,21 @@ export default function HouseholdPage() {
             <main className="flex-1 p-6 space-y-5 min-w-0">
               {loading && <p className="text-sm text-gray-500">Loading household data...</p>}
               {error && <p className="text-sm text-red-600">{error}</p>}
+              {actionError && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                  {actionError}
+                </p>
+              )}
               {data && (
                 <>
                   <HouseholdHero hero={data.hero} />
                   <HouseholdInfo info={data.info} />
                   <HouseholdMembers
                     members={data.members}
-                    onAddMember={() => setModalOpen(true)}
+                    onAddMember={openAddModal}
+                    onEditMember={openEditModal}
+                    onDeleteMember={handleDeleteMember}
+                    deletingId={deletingId}
                   />
                 </>
               )}
@@ -83,8 +143,10 @@ export default function HouseholdPage() {
       <AddFamilyMemberModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onSubmit={handleAddMember}
+        onSubmit={handleSaveMember}
         saving={saving}
+        mode={modalMode}
+        initialData={editingMember}
       />
     </div>
   );

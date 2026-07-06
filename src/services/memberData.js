@@ -1,7 +1,10 @@
-import { supabase } from "../lib/supabase";
+ 
+ import { supabase } from "../lib/supabase";
 import {
   PLAN_LABELS,
+  PLAN_MONTHLY,
   PLAN_PRICES,
+  getPlanMonthlyAmount,
   formatCurrency,
   formatDate,
   formatShortDate,
@@ -207,6 +210,40 @@ export async function addHouseholdMember(userId, householdId, memberData) {
   return data;
 }
 
+export async function updateHouseholdMember(userId, memberId, memberData) {
+  const { data, error } = await supabase
+    .from("family_members")
+    .update({
+      full_name: memberData.fullName,
+      relationship: memberData.relationship,
+      date_of_birth: memberData.dateOfBirth || null,
+      email: memberData.email || null,
+      phone: memberData.phone || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", memberId)
+    .eq("user_id", userId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteHouseholdMember(userId, memberId) {
+  const member = await fetchHouseholdMemberById(memberId, userId);
+  if (!member) throw new Error("Family member not found.");
+  if (member.is_primary) {
+    throw new Error("You cannot delete the primary household member (your account).");
+  }
+
+  const { error } = await supabase
+    .from("family_members")
+    .delete()
+    .eq("id", memberId)
+    .eq("user_id", userId);
+  if (error) throw error;
+}
+
 export async function markAllNotificationsRead(userId) {
   const { error } = await supabase
     .from("notifications")
@@ -228,11 +265,19 @@ function getDisplayName(profile, user) {
 }
 
 function getCommitment(membership) {
-  return Number(membership?.annual_commitment || 0) || PLAN_PRICES[membership?.plan_key] || 0;
+  const planKey = membership?.plan_key?.toLowerCase();
+  if (planKey && PLAN_PRICES[planKey]) {
+    return PLAN_PRICES[planKey];
+  }
+  return Number(membership?.annual_commitment || 0);
 }
 
-function getPaidTotal(contributions) {
-  return contributions
+function getMonthlyAmount(membership) {
+  return getPlanMonthlyAmount(membership?.plan_key, membership?.monthly_amount);
+}
+
+function getPaidTotal(_contributions, payments = []) {
+  return payments
     .filter((item) => item.status === "paid")
     .reduce((sum, item) => sum + Number(item.amount || 0), 0);
 }
@@ -246,7 +291,7 @@ export function buildCurrentUserData(profile, user, notifications) {
 export function buildDashboardData({ profile, user, membership, payments, contributions, householdMembers, notifications }) {
   const displayName = getDisplayName(profile, user);
   const commitment = getCommitment(membership);
-  const paidTotal = getPaidTotal(contributions);
+  const paidTotal = getPaidTotal(contributions, payments);
   const nextContribution = contributions
     .filter((item) => item.status !== "paid" && item.due_date)
     .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))[0];
@@ -281,7 +326,7 @@ export function buildDashboardData({ profile, user, membership, payments, contri
       totalCommitment: commitment,
       totalContributed: paidTotal,
       outstanding: Math.max(commitment - paidTotal, 0),
-      nextAmount: Number(nextContribution?.amount || 0),
+      nextAmount: Number(nextContribution?.amount || getMonthlyAmount(membership)),
       nextDueDate: nextContribution?.due_date || null,
     },
     recentPayments: payments.slice(0, 5).map((item) => ({
@@ -358,10 +403,14 @@ export function buildHouseholdData({ profile, household, members }) {
       initials: getInitials(m.full_name),
       name: m.full_name,
       isYou: m.is_primary,
+      isPrimary: m.is_primary,
       relationship: m.relationship || "Member",
       role: m.role || "Member",
       roleStyle: m.status === "owner" ? "bg-[#dcfce7] text-[#16a34a]" : "bg-[#dbeafe] text-[#1a6bdc]",
       dob: m.date_of_birth ? formatDate(m.date_of_birth) : "-",
+      dateOfBirth: m.date_of_birth || "",
+      email: m.email || "",
+      phone: m.phone || "",
     })),
     panel: {
       totalMembers: members.length,
@@ -374,6 +423,15 @@ export function buildHouseholdData({ profile, household, members }) {
 export function buildMemberDetailData({ member, household, members, profile }) {
   const primary = members.find((m) => m.is_primary);
   return {
+    memberId: member?.id,
+    isPrimary: member?.is_primary,
+    formData: {
+      fullName: member?.full_name || "",
+      relationship: member?.relationship || "Other",
+      dateOfBirth: member?.date_of_birth || "",
+      email: member?.email || "",
+      phone: member?.phone || "",
+    },
     hero: {
       name: member?.full_name,
       initials: getInitials(member?.full_name),
@@ -406,7 +464,7 @@ export function buildMemberDetailData({ member, household, members, profile }) {
 
 export function buildFinancialData({ membership, contributions, payments, recurring, paymentMethods, billingContact }) {
   const commitment = getCommitment(membership);
-  const paidTotal = getPaidTotal(contributions);
+  const paidTotal = getPaidTotal(contributions, payments);
   const outstanding = Math.max(commitment - paidTotal, 0);
   const paidPercent = commitment ? Math.round((paidTotal / commitment) * 100) : 0;
   const activeRecurring = recurring.filter((r) => r.status === "active");

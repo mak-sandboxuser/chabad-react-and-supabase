@@ -15,6 +15,11 @@
 --   5. Refreshes the signup trigger for new users
 -- =============================================================================
 
+-- Fix notification type constraint on older databases
+alter table public.notifications drop constraint if exists notifications_type_check;
+alter table public.notifications add constraint notifications_type_check
+  check (type in ('info', 'success', 'warning', 'household', 'payment', 'system'));
+
 -- =============================================================================
 -- STEP 1 — Backfill profiles from auth.users
 -- =============================================================================

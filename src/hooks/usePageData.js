@@ -53,18 +53,26 @@ function useAsyncData(loadFn, deps = []) {
 }
 
 export function useDashboardData() {
-  const { loading, error, data } = useAsyncData(async () => {
+  const { loading, error, data, refetch } = useAsyncData(async () => {
     const user = await getAuthUser();
     const userId = user.id;
-    const [profile, membership, payments, contributions, householdMembers, notifications] = await Promise.all([
+    const [profile, membership, allPayments, contributions, householdMembers, notifications] = await Promise.all([
       fetchProfile(userId),
       fetchMembership(userId),
-      fetchPayments(userId, 5),
+      fetchPayments(userId),
       fetchContributions(userId),
       fetchHouseholdMembers(userId),
       fetchNotifications(userId).catch(() => []),
     ]);
-    return buildDashboardData({ profile, user, membership, payments, contributions, householdMembers, notifications });
+    return buildDashboardData({
+      profile,
+      user,
+      membership,
+      payments: allPayments,
+      contributions,
+      householdMembers,
+      notifications,
+    });
   });
 
   const safeData = data || {
@@ -77,7 +85,7 @@ export function useDashboardData() {
     notifications: [],
   };
 
-  return { loading, error, data: safeData };
+  return { loading, error, data: safeData, refetch };
 }
 
 export function useMembershipData() {

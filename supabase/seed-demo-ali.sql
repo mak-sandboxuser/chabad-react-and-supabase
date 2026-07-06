@@ -10,6 +10,11 @@
 -- Safe to re-run: clears previous demo rows for this user, then re-inserts.
 -- =============================================================================
 
+-- Fix notification type constraint (older DBs may only allow info/success/warning)
+alter table public.notifications drop constraint if exists notifications_type_check;
+alter table public.notifications add constraint notifications_type_check
+  check (type in ('info', 'success', 'warning', 'household', 'payment', 'system'));
+
 do $$
 declare
   v_email text := 'ali@gamil.com';
@@ -178,8 +183,7 @@ begin
     (v_user_id, 200, 'paid', 'monthly', current_date - interval '75 days'),
     (v_user_id, 200, 'paid', 'monthly', current_date - interval '45 days'),
     (v_user_id, 200, 'paid', 'monthly', current_date - interval '15 days'),
-    (v_user_id, 200, 'pending', 'monthly', current_date + interval '15 days'),
-    (v_user_id, 2400, 'paid', 'annual', '2025-01-15');
+    (v_user_id, 200, 'pending', 'monthly', current_date + interval '15 days');
 
   -- -------------------------------------------------------------------------
   -- Payments (history)
@@ -191,7 +195,6 @@ begin
     reference_number, contribution_type, paid_at
   )
   values
-    (v_user_id, 2400, 'Annual Standard Membership', 'paid', 'card', 'Visa ending in 4242', 'TXN-ALI-2025-0001', 'annual', now() - interval '11 months'),
     (v_user_id, 200, 'Monthly Contribution', 'paid', 'card', 'Visa ending in 4242', 'TXN-ALI-2026-0001', 'monthly', now() - interval '75 days'),
     (v_user_id, 200, 'Monthly Contribution', 'paid', 'card', 'Visa ending in 4242', 'TXN-ALI-2026-0002', 'monthly', now() - interval '45 days'),
     (v_user_id, 200, 'Monthly Contribution', 'paid', 'upi', 'UPI • ali@gamil.com', 'TXN-ALI-2026-0003', 'monthly', now() - interval '15 days'),

@@ -16,6 +16,19 @@ export const PLAN_LABELS = {
   premium: "Premium",
 };
 
+/** Monthly contribution from plan catalog; ignores DB values that store annual price by mistake */
+export function getPlanMonthlyAmount(planKey, dbMonthlyAmount) {
+  const key = planKey?.toLowerCase();
+  const catalog = key ? PLAN_MONTHLY[key] : null;
+  const db = Number(dbMonthlyAmount || 0);
+
+  if (catalog && db > 0 && db <= 1000 && db !== PLAN_PRICES[key]) {
+    return db;
+  }
+
+  return catalog || 200;
+}
+
 export function formatCurrency(amount, currency = "INR") {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",

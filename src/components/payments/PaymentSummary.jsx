@@ -1,9 +1,14 @@
+import { formatCurrency } from "../../lib/format";
+
 export default function PaymentSummary({
-  contributionType = "One-time Contribution",
-  amount = "150.00",
-  processingFee = "0.00",
+  contributionType = "Monthly Membership",
+  amount = "200",
+  processingFee = "0",
+  paid = false,
 }) {
-  const total = (parseFloat(amount) + parseFloat(processingFee)).toFixed(2);
+  const amountNum = Number(amount) || 0;
+  const feeNum = Number(processingFee) || 0;
+  const total = amountNum + feeNum;
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5">
@@ -16,23 +21,25 @@ export default function PaymentSummary({
         </div>
         <div className="flex items-center justify-between">
           <span className="text-[12px] text-gray-500">Amount</span>
-          <span className="text-[12px] font-semibold text-gray-800">${amount}</span>
+          <span className="text-[12px] font-semibold text-gray-800">{formatCurrency(amountNum)}</span>
         </div>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <span className="text-[12px] text-gray-500">Processing Fee</span>
-            <svg className="w-3.5 h-3.5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
           </div>
-          <span className="text-[12px] font-semibold text-gray-800">${processingFee}</span>
+          <span className="text-[12px] font-semibold text-gray-800">{formatCurrency(feeNum)}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[12px] text-gray-500">Payment Provider</span>
+          <span className="text-[12px] font-semibold text-[#635bff]">Stripe</span>
         </div>
       </div>
 
       <div className="border-t border-gray-100 mt-4 pt-4 flex items-center justify-between">
-        <span className="text-[14px] font-bold text-gray-800">Total</span>
-        <span className="text-[18px] font-bold text-[#16a34a]">${total}</span>
+        <span className="text-[14px] font-bold text-gray-800">{paid ? "Paid" : "Total"}</span>
+        <span className={`text-[18px] font-bold ${paid ? "text-[#16a34a]" : "text-[#16a34a]"}`}>
+          {formatCurrency(total)}
+        </span>
       </div>
     </div>
   );
