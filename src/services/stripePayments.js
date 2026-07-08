@@ -1,5 +1,24 @@
 import { supabase } from "../lib/supabase";
 
+async function getEdgeFunctionErrorMessage(error, fallbackMessage) {
+  if (!error) return fallbackMessage;
+  const context = error.context;
+  if (context) {
+    try {
+      const payload = await context.json();
+      if (payload?.error) return payload.error;
+    } catch {
+      try {
+        const text = await context.text();
+        if (text) return text;
+      } catch {
+        // Ignore parse errors and fall through to generic message.
+      }
+    }
+  }
+  return error.message || fallbackMessage;
+}
+
 export async function createStripeCheckoutSession({
   amount,
   description = "Membership Contribution",
@@ -20,7 +39,7 @@ export async function createStripeCheckoutSession({
   });
 
   if (error) {
-    throw new Error(error.message || "Failed to start Stripe checkout.");
+    throw new Error(await getEdgeFunctionErrorMessage(error, "Failed to start Stripe checkout."));
   }
 
   if (data?.error) {
@@ -40,10 +59,10 @@ export async function verifyStripeCheckoutSession(sessionId) {
   });
 
   if (error) {
-    throw new Error(
-      error.message ||
-        "Failed to verify payment. Redeploy create-checkout-session Edge Function with latest code.",
-    );
+    throw new Error(await getEdgeFunctionErrorMessage(
+      error,
+      "Failed to verify payment. Redeploy create-checkout-session Edge Function with latest code.",
+    ));
   }
 
   if (data?.error) {
@@ -59,7 +78,7 @@ export async function createBillingPortalSession() {
   });
 
   if (error) {
-    throw new Error(error.message || "Failed to open billing portal.");
+    throw new Error(await getEdgeFunctionErrorMessage(error, "Failed to open billing portal."));
   }
 
   if (data?.error) {

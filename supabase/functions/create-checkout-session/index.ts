@@ -9,6 +9,22 @@ const corsHeaders = {
 
 const AUTO_PAY_DAY = 5;
 
+function getNextAutoPayAnchor(dayOfMonth: number) {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const currentDay = now.getUTCDate();
+
+  const anchorMonth = currentDay < dayOfMonth ? month : month + 1;
+  const anchorDate = new Date(Date.UTC(year, anchorMonth, dayOfMonth, 0, 0, 0));
+  return Math.floor(anchorDate.getTime() / 1000);
+}
+
+function getAnchorFromNow(minutesFromNow: number) {
+  const safeMinutes = Math.max(1, Math.floor(minutesFromNow));
+  return Math.floor(Date.now() / 1000) + safeMinutes * 60;
+}
+
 async function activateAutoPay(
   supabase: ReturnType<typeof createClient>,
   stripe: Stripe,
@@ -317,13 +333,13 @@ Deno.serve(async (req) => {
         },
       };
 
-      // Test only: first auto-charge after N minutes instead of waiting for the 5th.
+      // Stripe requires trial_end to be at least 2 days in future.
+      // For short test windows, use billing_cycle_anchor instead.
       if (testMinutes > 0) {
-        subscriptionData.trial_end = Math.floor(Date.now() / 1000) + testMinutes * 60;
+        subscriptionData.billing_cycle_anchor = getAnchorFromNow(testMinutes);
+        subscriptionData.proration_behavior = "none";
       } else {
-        subscriptionData.billing_cycle_anchor_config = {
-          day_of_month: AUTO_PAY_DAY,
-        };
+        subscriptionData.trial_end = getNextAutoPayAnchor(AUTO_PAY_DAY);
       }
 
       const session = await stripe.checkout.sessions.create({
