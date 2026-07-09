@@ -75,6 +75,31 @@ supabase secrets set SITE_URL=https://YOUR-LIVE-DOMAIN.com
 
 Replace with your real Vercel URL (e.g. `https://chabad-xxx.vercel.app`).
 
+## Fix: "localhost refused to connect" after Stripe payment
+
+**Cause:** Stripe redirected to `localhost:5173` but your dev server was not running, or you paid on live site while `SITE_URL` was still localhost.
+
+**Fix A (live website):**
+1. Push latest frontend code (sends your real site URL to Stripe)
+2. Deploy edge functions:
+   ```bash
+   supabase functions deploy create-checkout-session
+   supabase functions deploy create-billing-portal
+   ```
+3. Set live URL:
+   ```bash
+   supabase secrets set SITE_URL=https://YOUR-LIVE-VERCEL-URL.vercel.app
+   ```
+4. Pay again from your **live** website (not localhost)
+
+**Fix B (local testing):**
+1. Start dev server and keep it running:
+   ```bash
+   npm run dev
+   ```
+2. Open `http://localhost:5173` and pay from there
+3. Do not close terminal until Stripe redirects back
+
 ## Step 9 — Test auto-pay
 
 1. Payments → Monthly → check Auto-Pay

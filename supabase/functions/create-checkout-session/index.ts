@@ -25,6 +25,46 @@ function getAnchorFromNow(minutesFromNow: number) {
   return Math.floor(Date.now() / 1000) + safeMinutes * 60;
 }
 
+function resolveReturnBaseUrl(requested: unknown, fallback: string) {
+  const fallbackUrl = fallback.replace(/\/$/, "");
+
+  if (!requested || typeof requested !== "string") {
+    return fallbackUrl;
+  }
+
+  try {
+    const url = new URL(requested);
+    if (!["http:", "https:"].includes(url.protocol)) {
+      return fallbackUrl;
+    }
+
+    const origin = `${url.protocol}//${url.host}`;
+    const allowedOrigins = new Set([
+      fallbackUrl,
+      "http://localhost:5173",
+      "http://localhost:3000",
+      "http://127.0.0.1:5173",
+      ...(Deno.env.get("ALLOWED_RETURN_ORIGINS") || "")
+        .split(",")
+        .map((item) => item.trim().replace(/\/$/, ""))
+        .filter(Boolean),
+    ]);
+
+    if (allowedOrigins.has(origin)) {
+      return origin;
+    }
+
+    // Allow Vercel preview/production URLs without manual secret updates.
+    if (url.protocol === "https:" && url.hostname.endsWith(".vercel.app")) {
+      return origin;
+    }
+  } catch {
+    // Fall through to configured fallback URL.
+  }
+
+  return fallbackUrl;
+}
+
 async function activateAutoPay(
   supabase: ReturnType<typeof createClient>,
   stripe: Stripe,
@@ -180,7 +220,7 @@ Deno.serve(async (req) => {
     const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
-    const siteUrl = Deno.env.get("SITE_URL") || "http://localhost:5173";
+    const configuredSiteUrl = Deno.env.get("SITE_URL") || "http://localhost:5173";
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!stripeSecret || !supabaseUrl || !supabaseAnonKey) {
@@ -212,6 +252,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
+    const siteUrl = resolveReturnBaseUrl(body.returnBaseUrl, configuredSiteUrl);
     const stripe = new Stripe(stripeSecret, { apiVersion: "2023-10-16" });
 
     // --- VERIFY completed Stripe checkout ---

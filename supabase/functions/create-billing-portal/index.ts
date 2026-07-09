@@ -7,6 +7,45 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+function resolveReturnBaseUrl(requested: unknown, fallback: string) {
+  const fallbackUrl = fallback.replace(/\/$/, "");
+
+  if (!requested || typeof requested !== "string") {
+    return fallbackUrl;
+  }
+
+  try {
+    const url = new URL(requested);
+    if (!["http:", "https:"].includes(url.protocol)) {
+      return fallbackUrl;
+    }
+
+    const origin = `${url.protocol}//${url.host}`;
+    const allowedOrigins = new Set([
+      fallbackUrl,
+      "http://localhost:5173",
+      "http://localhost:3000",
+      "http://127.0.0.1:5173",
+      ...(Deno.env.get("ALLOWED_RETURN_ORIGINS") || "")
+        .split(",")
+        .map((item) => item.trim().replace(/\/$/, ""))
+        .filter(Boolean),
+    ]);
+
+    if (allowedOrigins.has(origin)) {
+      return origin;
+    }
+
+    if (url.protocol === "https:" && url.hostname.endsWith(".vercel.app")) {
+      return origin;
+    }
+  } catch {
+    // Fall through to configured fallback URL.
+  }
+
+  return fallbackUrl;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { status: 200, headers: corsHeaders });
@@ -16,7 +55,7 @@ Deno.serve(async (req) => {
     const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
-    const siteUrl = Deno.env.get("SITE_URL") || "http://localhost:5173";
+    const configuredSiteUrl = Deno.env.get("SITE_URL") || "http://localhost:5173";
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!stripeSecret || !supabaseUrl || !supabaseAnonKey || !serviceKey) {
@@ -47,6 +86,8 @@ Deno.serve(async (req) => {
       });
     }
 
+    const body = await req.json().catch(() => ({}));
+    const siteUrl = resolveReturnBaseUrl(body.returnBaseUrl, configuredSiteUrl);
     const stripe = new Stripe(stripeSecret, { apiVersion: "2023-10-16" });
     const supabaseAdmin = createClient(supabaseUrl, serviceKey);
 

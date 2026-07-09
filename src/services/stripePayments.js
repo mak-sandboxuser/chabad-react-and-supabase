@@ -35,6 +35,7 @@ export async function createStripeCheckoutSession({
       contributionType,
       billingRecordId,
       autoPay,
+      returnBaseUrl: window.location.origin,
     },
   });
 
@@ -74,7 +75,9 @@ export async function verifyStripeCheckoutSession(sessionId) {
 
 export async function createBillingPortalSession() {
   const { data, error } = await supabase.functions.invoke("create-billing-portal", {
-    body: {},
+    body: {
+      returnBaseUrl: window.location.origin,
+    },
   });
 
   if (error) {
