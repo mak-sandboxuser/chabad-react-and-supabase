@@ -460,7 +460,7 @@ async function handleSubscriptionUpdated(
     .update({
       amount,
       next_charge_date: nextCharge,
-      status: subscription.status === "active" ? "active" : "inactive",
+      status: subscription.status === "active" ? "active" : "cancelled",
     })
     .eq("stripe_subscription_id", subscription.id);
 
