@@ -97,23 +97,28 @@ export default function PaymentDetailsForm({
       </div>
 
       {contributionType === "monthly" && (
-        <div className="mb-6 rounded-xl border border-[#e0e7ff] bg-[#f5f7ff] px-4 py-4">
-          <label className="flex items-start gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoPay}
-              onChange={(e) => setAutoPay(e.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-gray-300 text-[#1a2a5e] focus:ring-[#1a2a5e]"
-            />
-            <div>
-              <p className="text-[13px] font-semibold text-gray-800">
-                Pay automatically every month on the 5th
-              </p>
-              <p className="text-[12px] text-gray-500 mt-0.5">
-                Stripe will save your card and charge {formatCurrency(amount || defaultAmount)} on the 5th of each month. You can cancel anytime from Manage Billing.
-              </p>
-            </div>
+        <div className="mb-6">
+          <label className="block text-[13px] font-semibold text-gray-700 mb-2">
+            Auto-Pay
           </label>
+          <div className="rounded-xl border-2 border-[#c7d2fe] bg-[#eef2ff] px-4 py-4 shadow-sm">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoPay}
+                onChange={(e) => setAutoPay(e.target.checked)}
+                className="mt-1 h-5 w-5 rounded border-gray-300 text-[#1a2a5e] focus:ring-[#1a2a5e]"
+              />
+              <div>
+                <p className="text-[14px] font-semibold text-[#1a2a5e]">
+                  Pay automatically every month on the 5th
+                </p>
+                <p className="text-[12px] text-gray-600 mt-1">
+                  Stripe will save your card and charge {formatCurrency(amount || defaultAmount)} on the 5th of each month. You can cancel anytime from Manage Billing.
+                </p>
+              </div>
+            </label>
+          </div>
         </div>
       )}
 
