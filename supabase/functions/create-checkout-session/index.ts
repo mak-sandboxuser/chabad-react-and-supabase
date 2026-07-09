@@ -237,7 +237,7 @@ async function activateAutoPay(
     await supabase.from("notifications").insert({
       user_id: userId,
       title: "Auto-Pay Enabled",
-      body: `Your monthly contribution of ₹${amount.toLocaleString("en-IN")} will be charged automatically on the ${AUTO_PAY_DAY}th of each month.`,
+      body: `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. ₹${amount.toLocaleString("en-IN")} will be charged automatically on the ${AUTO_PAY_DAY}th of each month.`,
       type: "payment",
     });
   }
@@ -475,7 +475,8 @@ Deno.serve(async (req) => {
     const description = body.description || "Membership Contribution";
     const notes = body.notes || "";
     const billingRecordId = body.billingRecordId ? String(body.billingRecordId) : "";
-    const autoPay = body.autoPay === true;
+    const isMonthlySubscription =
+      body.autoPay === true || body.contributionType === "monthly";
 
     if (!amount || amount < 1) {
       return new Response(JSON.stringify({ error: "Enter a valid payment amount." }), {
@@ -510,24 +511,28 @@ Deno.serve(async (req) => {
         .eq("id", user.id);
     }
 
-    if (autoPay) {
+    if (isMonthlySubscription) {
       const testMinutes = Number(Deno.env.get("AUTO_PAY_TEST_MINUTES") || 0);
+      const planKey = body.planKey ? String(body.planKey) : "";
       const subscriptionData: Record<string, unknown> = {
         metadata: {
           user_id: user.id,
           contribution_type: "monthly",
           charge_day: String(AUTO_PAY_DAY),
+          plan_key: planKey,
           test_mode: testMinutes > 0 ? "true" : "false",
         },
       };
 
-      // Stripe requires trial_end to be at least 2 days in future.
-      // For short test windows, use billing_cycle_anchor instead.
       if (testMinutes > 0) {
+        // Test only: next charge in N minutes
         subscriptionData.billing_cycle_anchor = getAnchorFromNow(testMinutes);
         subscriptionData.proration_behavior = "none";
       } else {
-        subscriptionData.trial_end = getNextAutoPayAnchor(AUTO_PAY_DAY);
+        // Production: charge first month at checkout, renew on the 5th each month
+        subscriptionData.billing_cycle_anchor_config = {
+          day_of_month: AUTO_PAY_DAY,
+        };
       }
 
       const session = await stripe.checkout.sessions.create({
@@ -543,7 +548,7 @@ Deno.serve(async (req) => {
                 name: description,
                 description: testMinutes > 0
                   ? `TEST: first charge in ${testMinutes} minutes`
-                  : `Charged automatically on the ${AUTO_PAY_DAY}th of every month`,
+                  : `First month now, then ₹${amount}/month on the ${AUTO_PAY_DAY}th`,
               },
               recurring: { interval: "month" },
             },
@@ -555,7 +560,8 @@ Deno.serve(async (req) => {
           user_id: user.id,
           notes,
           auto_pay: "true",
-          contribution_type: body.contributionType || "monthly",
+          contribution_type: "monthly",
+          plan_key: planKey,
         },
         success_url: `${siteUrl}/payments?subscription=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${siteUrl}/payments?canceled=true`,

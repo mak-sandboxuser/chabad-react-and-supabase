@@ -176,7 +176,7 @@ async function activateAutoPay(
       await supabase.from("notifications").insert({
         user_id: userId,
         title: "Auto-Pay Enabled",
-        body: `Your monthly contribution of ₹${amount.toLocaleString("en-IN")} will be charged automatically on the ${AUTO_PAY_DAY}th of each month.`,
+        body: `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. ₹${amount.toLocaleString("en-IN")} will be charged automatically on the ${AUTO_PAY_DAY}th of each month.`,
         type: "payment",
       });
     }

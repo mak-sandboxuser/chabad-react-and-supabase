@@ -22,6 +22,8 @@ export default function MakePaymentPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [paying, setPaying] = useState(false);
   const [defaultAmount, setDefaultAmount] = useState("200");
+  const [planLabel, setPlanLabel] = useState("Membership");
+  const [planKey, setPlanKey] = useState("");
   const [billingRecordId, setBillingRecordId] = useState(null);
   const [paymentData, setPaymentData] = useState({
     amount: "200",
@@ -59,6 +61,8 @@ export default function MakePaymentPage() {
 
         const planLabel = planKey ? PLAN_LABELS[planKey] : "Membership";
 
+        setPlanLabel(planLabel);
+        setPlanKey(planKey || "");
         setDefaultAmount(String(monthly));
         setPaymentData({
           amount: String(monthly),
@@ -125,13 +129,12 @@ export default function MakePaymentPage() {
   const handlePayWithStripe = async ({ amount, description, notes, contributionType, autoPay }) => {
     setPaying(true);
     try {
+      const isMonthly = contributionType === "monthly";
       setPaymentData({
         amount: String(amount),
-        contributionType: autoPay
-          ? "Auto-Pay (5th of each month)"
-          : contributionType === "monthly"
-            ? "Monthly Membership"
-            : "One-time Contribution",
+        contributionType: isMonthly
+          ? `${planLabel} Membership — Monthly Auto-Pay`
+          : "One-time Contribution",
       });
 
       const { url } = await createStripeCheckoutSession({
@@ -139,8 +142,9 @@ export default function MakePaymentPage() {
         description,
         notes,
         contributionType,
-        billingRecordId: autoPay ? null : billingRecordId,
-        autoPay,
+        billingRecordId: isMonthly ? null : billingRecordId,
+        autoPay: isMonthly,
+        planKey,
       });
 
       window.location.href = url;
@@ -183,21 +187,13 @@ export default function MakePaymentPage() {
               {(success || subscriptionSuccess) && verifyState.verified && (
                 <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-4">
                   <p className="text-[14px] font-semibold text-green-800">
-                    {verifyState.autoPay ? "Auto-pay setup complete" : "Payment complete"}
+                    {verifyState.autoPay ? "Membership payment & auto-pay active" : "Payment complete"}
                   </p>
                   <p className="text-[13px] text-green-700 mt-1">
                     {verifyState.autoPay
                       ? verifyState.paymentRecorded
-                        ? `${formatCurrency(verifyState.amount)} was charged and auto-pay is active.`
-                        : `Your card is saved. ${formatCurrency(verifyState.amount)} will be charged automatically${
-                            verifyState.nextChargeDate
-                              ? ` on ${new Date(verifyState.nextChargeDate).toLocaleDateString("en-IN", {
-                                  day: "numeric",
-                                  month: "short",
-                                  year: "numeric",
-                                })}`
-                              : " on the 5th of each month"
-                          }. No payment has been charged yet.`
+                        ? `${formatCurrency(verifyState.amount)} was charged for your first month. Auto-pay is active — future charges on the 5th of each month.`
+                        : `${formatCurrency(verifyState.amount)} monthly plan is active. Your card is saved for automatic billing on the 5th of each month.`
                       : `${formatCurrency(verifyState.amount)} was recorded successfully. Your dashboard is updated.`}
                   </p>
                   <div className="flex items-center gap-3 mt-3">
@@ -251,6 +247,7 @@ export default function MakePaymentPage() {
                   <EncouragementBanner />
                   <PaymentDetailsForm
                     defaultAmount={defaultAmount}
+                    planLabel={planLabel}
                     onPayWithStripe={handlePayWithStripe}
                     paying={paying}
                   />

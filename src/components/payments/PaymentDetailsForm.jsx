@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatCurrency } from "../../lib/format";
 
 const CONTRIBUTION_TYPES = [
@@ -6,20 +6,27 @@ const CONTRIBUTION_TYPES = [
   { id: "one-time", label: "One-time Contribution" },
 ];
 
+const AUTO_PAY_DAY = 5;
+
 export default function PaymentDetailsForm({
   defaultAmount = "200",
+  planLabel = "Membership",
   onPayWithStripe,
   paying = false,
 }) {
-  const [autoPay, setAutoPay] = useState(false);
   const [amount, setAmount] = useState(defaultAmount);
   const [contributionType, setContributionType] = useState("monthly");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
+  const isMonthly = contributionType === "monthly";
+
+  useEffect(() => {
+    setAmount(defaultAmount);
+  }, [defaultAmount]);
 
   const handlePay = async () => {
     setError("");
-    const parsed = Number(amount);
+    const parsed = Number(isMonthly ? defaultAmount : amount);
 
     if (!parsed || parsed < 1) {
       setError("Please enter a valid amount (minimum ₹1).");
@@ -31,13 +38,10 @@ export default function PaymentDetailsForm({
         amount: parsed,
         contributionType,
         notes,
-        autoPay: contributionType === "monthly" && autoPay,
-        description:
-          contributionType === "monthly" && autoPay
-            ? "Monthly Membership Auto-Pay"
-            : contributionType === "monthly"
-              ? "Monthly Membership Contribution"
-              : "One-time Contribution",
+        autoPay: isMonthly,
+        description: isMonthly
+          ? `${planLabel} Membership — Monthly`
+          : "One-time Contribution",
       });
     } catch (err) {
       setError(err.message || "Payment could not be started.");
@@ -57,10 +61,7 @@ export default function PaymentDetailsForm({
             <button
               key={type.id}
               type="button"
-              onClick={() => {
-                setContributionType(type.id);
-                if (type.id !== "monthly") setAutoPay(false);
-              }}
+              onClick={() => setContributionType(type.id)}
               className={`rounded-xl border px-4 py-3 text-left text-[13px] font-medium transition-colors ${
                 contributionType === type.id
                   ? "border-[#1a2a5e] bg-[#f4f6fb] text-[#1a2a5e]"
@@ -81,49 +82,32 @@ export default function PaymentDetailsForm({
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
             <span className="text-gray-400 text-[15px] font-medium">₹</span>
           </div>
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              disabled={autoPay}
-              className="w-full pl-8 pr-4 py-3 border border-gray-200 rounded-xl text-[15px] font-medium text-gray-800
-                focus:outline-none focus:ring-2 focus:ring-[#1a2a5e]/15 focus:border-[#1a2a5e] transition-all disabled:bg-gray-50 disabled:text-gray-500"
-            />
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={isMonthly ? defaultAmount : amount}
+            onChange={(e) => setAmount(e.target.value)}
+            disabled={isMonthly}
+            className="w-full pl-8 pr-4 py-3 border border-gray-200 rounded-xl text-[15px] font-medium text-gray-800
+              focus:outline-none focus:ring-2 focus:ring-[#1a2a5e]/15 focus:border-[#1a2a5e] transition-all disabled:bg-gray-50 disabled:text-gray-500"
+          />
         </div>
         <p className="text-[12px] text-gray-400 mt-2">
-          Suggested monthly amount based on your plan: {formatCurrency(defaultAmount)}
+          {isMonthly
+            ? `${planLabel} plan monthly rate: ${formatCurrency(defaultAmount)}`
+            : `Suggested amount: ${formatCurrency(defaultAmount)}`}
         </p>
       </div>
 
-      {contributionType === "monthly" && (
-        <div className="mb-6">
-          <label className="block text-[13px] font-semibold text-gray-700 mb-2">
-            Auto-Pay
-          </label>
-          <div className="rounded-xl border-2 border-[#c7d2fe] bg-[#eef2ff] px-4 py-4 shadow-sm">
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoPay}
-                onChange={(e) => {
-                const checked = e.target.checked;
-                setAutoPay(checked);
-                if (checked) setAmount(defaultAmount);
-              }}
-                className="mt-1 h-5 w-5 rounded border-gray-300 text-[#1a2a5e] focus:ring-[#1a2a5e]"
-              />
-              <div>
-                <p className="text-[14px] font-semibold text-[#1a2a5e]">
-                  Pay automatically every month on the 5th
-                </p>
-                <p className="text-[12px] text-gray-600 mt-1">
-                  Stripe will save your card and charge {formatCurrency(amount || defaultAmount)} on the 5th of each month. You can cancel anytime from Manage Billing.
-                </p>
-              </div>
-            </label>
-          </div>
+      {isMonthly && (
+        <div className="mb-6 rounded-xl border-2 border-[#c7d2fe] bg-[#eef2ff] px-4 py-4">
+          <p className="text-[14px] font-semibold text-[#1a2a5e]">Auto-Pay included</p>
+          <p className="text-[12px] text-gray-600 mt-1">
+            You pay {formatCurrency(defaultAmount)} today for your first month. After that, Stripe
+            automatically charges {formatCurrency(defaultAmount)} on the {AUTO_PAY_DAY}th of each
+            month from your saved card. Cancel anytime from Manage Billing.
+          </p>
         </div>
       )}
 
@@ -168,8 +152,8 @@ export default function PaymentDetailsForm({
       >
         {paying
           ? "Redirecting to Stripe..."
-          : autoPay && contributionType === "monthly"
-            ? "Set Up Auto-Pay with Stripe"
+          : isMonthly
+            ? `Pay ${formatCurrency(defaultAmount)} & Enable Auto-Pay`
             : "Pay with Stripe"}
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
