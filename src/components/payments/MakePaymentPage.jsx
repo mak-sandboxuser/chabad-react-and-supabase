@@ -32,6 +32,8 @@ export default function MakePaymentPage() {
     verified: false,
     amount: null,
     autoPay: false,
+    nextChargeDate: null,
+    paymentRecorded: false,
     error: "",
   });
 
@@ -81,7 +83,7 @@ export default function MakePaymentPage() {
   const verifiedSessionRef = useRef(null);
 
   const runVerification = async (id) => {
-    setVerifyState({ loading: true, verified: false, amount: null, autoPay: false, error: "" });
+    setVerifyState({ loading: true, verified: false, amount: null, autoPay: false, nextChargeDate: null, paymentRecorded: false, error: "" });
     try {
       const result = await verifyStripeCheckoutSession(id);
       setVerifyState({
@@ -89,6 +91,8 @@ export default function MakePaymentPage() {
         verified: true,
         amount: result.amount,
         autoPay: Boolean(result.autoPay),
+        nextChargeDate: result.nextChargeDate || null,
+        paymentRecorded: Boolean(result.paymentRecorded),
         error: "",
       });
       setPaymentData((prev) => ({
@@ -104,6 +108,8 @@ export default function MakePaymentPage() {
         verified: false,
         amount: null,
         autoPay: false,
+        nextChargeDate: null,
+        paymentRecorded: false,
         error: err.message || "Payment verification failed.",
       });
     }
@@ -145,7 +151,7 @@ export default function MakePaymentPage() {
 
   const dismissStatus = () => {
     setSearchParams({});
-    setVerifyState({ loading: false, verified: false, amount: null, autoPay: false, error: "" });
+    setVerifyState({ loading: false, verified: false, amount: null, autoPay: false, nextChargeDate: null, paymentRecorded: false, error: "" });
   };
 
   const summaryAmount =
@@ -177,11 +183,21 @@ export default function MakePaymentPage() {
               {(success || subscriptionSuccess) && verifyState.verified && (
                 <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-4">
                   <p className="text-[14px] font-semibold text-green-800">
-                    {verifyState.autoPay ? "Auto-pay enabled" : "Payment complete"}
+                    {verifyState.autoPay ? "Auto-pay setup complete" : "Payment complete"}
                   </p>
                   <p className="text-[13px] text-green-700 mt-1">
                     {verifyState.autoPay
-                      ? `${formatCurrency(verifyState.amount)} will be charged automatically on the 5th of each month.`
+                      ? verifyState.paymentRecorded
+                        ? `${formatCurrency(verifyState.amount)} was charged and auto-pay is active.`
+                        : `Your card is saved. ${formatCurrency(verifyState.amount)} will be charged automatically${
+                            verifyState.nextChargeDate
+                              ? ` on ${new Date(verifyState.nextChargeDate).toLocaleDateString("en-IN", {
+                                  day: "numeric",
+                                  month: "short",
+                                  year: "numeric",
+                                })}`
+                              : " on the 5th of each month"
+                          }. No payment has been charged yet.`
                       : `${formatCurrency(verifyState.amount)} was recorded successfully. Your dashboard is updated.`}
                   </p>
                   <div className="flex items-center gap-3 mt-3">

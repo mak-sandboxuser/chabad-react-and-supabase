@@ -81,15 +81,16 @@ export default function PaymentDetailsForm({
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
             <span className="text-gray-400 text-[15px] font-medium">₹</span>
           </div>
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className="w-full pl-8 pr-4 py-3 border border-gray-200 rounded-xl text-[15px] font-medium text-gray-800
-              focus:outline-none focus:ring-2 focus:ring-[#1a2a5e]/15 focus:border-[#1a2a5e] transition-all"
-          />
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              disabled={autoPay}
+              className="w-full pl-8 pr-4 py-3 border border-gray-200 rounded-xl text-[15px] font-medium text-gray-800
+                focus:outline-none focus:ring-2 focus:ring-[#1a2a5e]/15 focus:border-[#1a2a5e] transition-all disabled:bg-gray-50 disabled:text-gray-500"
+            />
         </div>
         <p className="text-[12px] text-gray-400 mt-2">
           Suggested monthly amount based on your plan: {formatCurrency(defaultAmount)}
@@ -106,7 +107,11 @@ export default function PaymentDetailsForm({
               <input
                 type="checkbox"
                 checked={autoPay}
-                onChange={(e) => setAutoPay(e.target.checked)}
+                onChange={(e) => {
+                const checked = e.target.checked;
+                setAutoPay(checked);
+                if (checked) setAmount(defaultAmount);
+              }}
                 className="mt-1 h-5 w-5 rounded border-gray-300 text-[#1a2a5e] focus:ring-[#1a2a5e]"
               />
               <div>
