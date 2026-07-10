@@ -97,7 +97,7 @@ async function activateTestAutoPay(
   }
 
   const nextChargeUnix = Math.floor(Date.now() / 1000) + testMinutes * 60;
-  const farFutureAnchor = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+  const suppressBillingUntil = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
   const product = await stripe.products.create({
     name: description,
     description: `TEST: auto-charge every ${testMinutes} minutes`,
@@ -112,8 +112,7 @@ async function activateTestAutoPay(
         recurring: { interval: "month" },
       },
     }],
-    billing_cycle_anchor: farFutureAnchor,
-    proration_behavior: "none",
+    trial_end: suppressBillingUntil,
     metadata: {
       user_id: userId,
       test_mode: "true",

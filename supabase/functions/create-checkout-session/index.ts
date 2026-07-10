@@ -109,7 +109,7 @@ async function activateTestAutoPay(
     .eq("status", "active");
 
   const nextChargeUnix = Math.floor(Date.now() / 1000) + testMinutes * 60;
-  const farFutureAnchor = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+  const suppressBillingUntil = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
   const product = await stripe.products.create({
     name: description,
     description: `TEST: auto-charge every ${testMinutes} minutes`,
@@ -124,8 +124,7 @@ async function activateTestAutoPay(
         recurring: { interval: "month" },
       },
     }],
-    billing_cycle_anchor: farFutureAnchor,
-    proration_behavior: "none",
+    trial_end: suppressBillingUntil,
     metadata: {
       user_id: userId,
       test_mode: "true",
@@ -397,8 +396,8 @@ async function activateAutoPay(
       subscriptionId,
       sessionFallback,
     );
-    const nextChargeIso = testMinutes > 0
-      ? new Date((sub.billing_cycle_anchor || sub.current_period_end) * 1000).toISOString()
+    const nextChargeIso = testMinutes > 0 && sub.metadata?.next_charge_at
+      ? new Date(Number(sub.metadata.next_charge_at) * 1000).toISOString()
       : new Date(sub.current_period_end * 1000).toISOString();
     if (nextChargeIso) {
       await supabase
@@ -447,8 +446,8 @@ async function activateAutoPay(
     sessionFallback,
   );
 
-  const nextChargeIso = testMinutes > 0
-    ? new Date((sub.billing_cycle_anchor || sub.current_period_end) * 1000).toISOString()
+  const nextChargeIso = testMinutes > 0 && sub.metadata?.next_charge_at
+    ? new Date(Number(sub.metadata.next_charge_at) * 1000).toISOString()
     : new Date(sub.current_period_end * 1000).toISOString();
   const nextChargeDate = (nextChargeIso || new Date().toISOString()).slice(0, 10);
 
