@@ -103,16 +103,17 @@ async function activateTestAutoPay(
   }
 
   const anchorUnix = Math.floor(Date.now() / 1000) + testMinutes * 60;
+  const product = await stripe.products.create({
+    name: description,
+    description: `TEST: auto-charge every ${testMinutes} minutes`,
+  });
   const subscription = await stripe.subscriptions.create({
     customer: customerId,
     items: [{
       price_data: {
         currency: "inr",
         unit_amount: Math.round(amount * 100),
-        product_data: {
-          name: description,
-          description: `TEST: auto-charge every ${testMinutes} minutes`,
-        },
+        product: product.id,
         recurring: { interval: "month" },
       },
     }],
