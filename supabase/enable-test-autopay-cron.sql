@@ -13,7 +13,7 @@ where jobname = 'process-test-autopay';
 
 select cron.schedule(
   'process-test-autopay',
-  '*/2 * * * *',
+  '* * * * *',
   $$
   select net.http_post(
     url := 'https://bifcjbwvzpbfpfowxjkt.supabase.co/functions/v1/process-test-autopay',

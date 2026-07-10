@@ -121,6 +121,7 @@ async function activateTestAutoPay(
       plan_key: planKey,
       charge_day: String(chargeDay),
       contribution_type: "monthly",
+      amount: String(amount),
     },
   });
 
@@ -789,6 +790,57 @@ Deno.serve(async (req) => {
     if (event.type === "customer.subscription.deleted") {
       const subscription = event.data.object as Stripe.Subscription;
       return await handleSubscriptionCancelled(supabase, subscription);
+    }
+
+    if (event.type === "payment_intent.succeeded") {
+      const paymentIntent = event.data.object as Stripe.PaymentIntent;
+      if (paymentIntent.metadata?.auto_pay_test !== "true") {
+        return new Response(JSON.stringify({ received: true }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const userId = paymentIntent.metadata?.user_id;
+      const subscriptionId = paymentIntent.metadata?.subscription_id;
+      if (!userId) {
+        return new Response(JSON.stringify({ received: true, skipped: "no_user" }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const amount = (paymentIntent.amount_received || paymentIntent.amount || 0) / 100;
+      const referenceNumber = paymentIntent.id;
+      const { data: existing } = await supabase
+        .from("payments")
+        .select("id")
+        .eq("reference_number", referenceNumber)
+        .maybeSingle();
+
+      if (!existing && amount > 0) {
+        await supabase.from("payments").insert({
+          user_id: userId,
+          amount,
+          description: "Membership Auto-Pay (TEST)",
+          status: "paid",
+          payment_method: "card",
+          payment_method_label: "Stripe Auto-Pay",
+          reference_number: referenceNumber,
+          contribution_type: "monthly",
+          paid_at: new Date().toISOString(),
+        });
+      }
+
+      if (subscriptionId) {
+        const sub = await stripe.subscriptions.retrieve(subscriptionId);
+        const testMinutes = getTestMinutes(sub);
+        if (testMinutes > 0) {
+          await setNextTestChargeAt(stripe, subscriptionId, testMinutes);
+        }
+      }
+
+      return new Response(JSON.stringify({ received: true }), {
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     return new Response(JSON.stringify({ received: true }), {

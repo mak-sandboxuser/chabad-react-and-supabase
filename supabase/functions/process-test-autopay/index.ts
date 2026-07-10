@@ -27,6 +27,189 @@ function isAuthorized(req: Request) {
   return Boolean(serviceKey && auth === `Bearer ${serviceKey}`);
 }
 
+async function resolvePaymentMethodId(stripe: Stripe, customerId: string) {
+  const customer = await stripe.customers.retrieve(customerId);
+  if (customer.deleted) return null;
+
+  const fromSettings = customer.invoice_settings?.default_payment_method;
+  if (typeof fromSettings === "string") return fromSettings;
+  if (fromSettings && typeof fromSettings !== "string") return fromSettings.id;
+
+  const paymentMethods = await stripe.paymentMethods.list({
+    customer: customerId,
+    type: "card",
+    limit: 1,
+  });
+  return paymentMethods.data[0]?.id || null;
+}
+
+async function recordTestPayment(
+  supabase: ReturnType<typeof createClient>,
+  {
+    userId,
+    amount,
+    referenceNumber,
+    testMinutes,
+  }: {
+    userId: string;
+    amount: number;
+    referenceNumber: string;
+    testMinutes: number;
+  },
+) {
+  const { data: existing } = await supabase
+    .from("payments")
+    .select("id")
+    .eq("reference_number", referenceNumber)
+    .maybeSingle();
+
+  if (existing) return false;
+
+  const paidAt = new Date().toISOString();
+  const { error } = await supabase.from("payments").insert({
+    user_id: userId,
+    amount,
+    description: "Membership Auto-Pay (TEST)",
+    status: "paid",
+    payment_method: "card",
+    payment_method_label: "Stripe Auto-Pay",
+    reference_number: referenceNumber,
+    contribution_type: "monthly",
+    paid_at: paidAt,
+  });
+
+  if (error && error.code !== "23505") throw error;
+
+  await supabase.from("notifications").insert({
+    user_id: userId,
+    title: "Test Auto-Pay Successful",
+    body: `₹${amount.toLocaleString("en-IN")} charged. Next TEST charge in ${testMinutes} minutes.`,
+    type: "payment",
+  });
+
+  return true;
+}
+
+async function chargeDueSubscription(
+  stripe: Stripe,
+  supabase: ReturnType<typeof createClient>,
+  row: { stripe_subscription_id: string; user_id: string; amount: number },
+  now: number,
+) {
+  const subscriptionId = row.stripe_subscription_id;
+  const sub = await stripe.subscriptions.retrieve(subscriptionId);
+
+  if (!isTestSubscription(sub)) {
+    return { subscriptionId, skipped: true, reason: "not_test_mode" };
+  }
+  if (sub.status === "canceled" || sub.status === "incomplete_expired") {
+    return { subscriptionId, skipped: true, reason: "inactive_subscription" };
+  }
+
+  const testMinutes = getTestMinutes(sub);
+  let nextChargeAt = Number(sub.metadata?.next_charge_at || 0);
+
+  if (!nextChargeAt) {
+    nextChargeAt = now + Math.max(testMinutes, 1) * 60;
+    await stripe.subscriptions.update(subscriptionId, {
+      metadata: {
+        ...sub.metadata,
+        test_mode: "true",
+        test_minutes: String(testMinutes),
+        next_charge_at: String(nextChargeAt),
+      },
+    });
+    return {
+      subscriptionId,
+      skipped: true,
+      reason: "backfilled_next_charge_at",
+      nextChargeAt: new Date(nextChargeAt * 1000).toISOString(),
+    };
+  }
+
+  if (now < nextChargeAt) {
+    return {
+      subscriptionId,
+      skipped: true,
+      reason: "not_due_yet",
+      nextChargeAt: new Date(nextChargeAt * 1000).toISOString(),
+    };
+  }
+
+  const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
+  if (!customerId) {
+    return { subscriptionId, error: "Missing Stripe customer." };
+  }
+
+  const paymentMethodId = await resolvePaymentMethodId(stripe, customerId);
+  if (!paymentMethodId) {
+    return { subscriptionId, error: "No saved card on file for auto-pay." };
+  }
+
+  const amount = Number(row.amount || sub.metadata?.amount || 0);
+  if (!amount || amount < 1) {
+    return { subscriptionId, error: "Invalid charge amount." };
+  }
+
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount: Math.round(amount * 100),
+    currency: "inr",
+    customer: customerId,
+    payment_method: paymentMethodId,
+    off_session: true,
+    confirm: true,
+    description: "Membership Auto-Pay (TEST)",
+    metadata: {
+      user_id: row.user_id,
+      subscription_id: subscriptionId,
+      test_mode: "true",
+      auto_pay_test: "true",
+    },
+  });
+
+  if (paymentIntent.status !== "succeeded") {
+    return {
+      subscriptionId,
+      error: `Payment status: ${paymentIntent.status}`,
+      paymentIntentId: paymentIntent.id,
+    };
+  }
+
+  const nextUnix = now + Math.max(testMinutes, 1) * 60;
+  await stripe.subscriptions.update(subscriptionId, {
+    metadata: {
+      ...sub.metadata,
+      next_charge_at: String(nextUnix),
+    },
+  });
+
+  await recordTestPayment(supabase, {
+    userId: row.user_id,
+    amount,
+    referenceNumber: paymentIntent.id,
+    testMinutes,
+  });
+
+  const nextChargeDate = new Date(nextUnix * 1000).toISOString().slice(0, 10);
+  await supabase
+    .from("recurring_contributions")
+    .update({
+      next_charge_date: nextChargeDate,
+      status: "active",
+      amount,
+      description: `Membership Auto-Pay (TEST every ${testMinutes} min)`,
+    })
+    .eq("stripe_subscription_id", subscriptionId);
+
+  return {
+    subscriptionId,
+    charged: true,
+    paymentIntentId: paymentIntent.id,
+    amount,
+    nextChargeAt: new Date(nextUnix * 1000).toISOString(),
+  };
+}
+
 Deno.serve(async (req) => {
   if (!isAuthorized(req)) {
     return new Response(JSON.stringify({ error: "Unauthorized." }), {
@@ -65,89 +248,18 @@ Deno.serve(async (req) => {
   }
 
   for (const row of rows || []) {
-    const subscriptionId = row.stripe_subscription_id;
-    if (!subscriptionId) continue;
-
+    if (!row.stripe_subscription_id) continue;
     try {
-      const sub = await stripe.subscriptions.retrieve(subscriptionId);
-      if (!isTestSubscription(sub)) continue;
-      if (sub.status === "canceled" || sub.status === "incomplete_expired") continue;
-
-      const testMinutes = getTestMinutes(sub);
-      let nextChargeAt = Number(sub.metadata?.next_charge_at || 0);
-
-      // Backfill schedule for subscriptions created before metadata-based billing.
-      if (!nextChargeAt) {
-        nextChargeAt = now + Math.max(testMinutes, 1) * 60;
-        await stripe.subscriptions.update(subscriptionId, {
-          metadata: {
-            ...sub.metadata,
-            test_mode: "true",
-            test_minutes: String(testMinutes),
-            next_charge_at: String(nextChargeAt),
-          },
-        });
-        results.push({
-          subscriptionId,
-          skipped: true,
-          reason: "backfilled_next_charge_at",
-          nextChargeAt: new Date(nextChargeAt * 1000).toISOString(),
-        });
-        continue;
-      }
-
-      if (now < nextChargeAt) {
-        results.push({
-          subscriptionId,
-          skipped: true,
-          reason: "not_due_yet",
-          nextChargeAt: new Date(nextChargeAt * 1000).toISOString(),
-        });
-        continue;
-      }
-
-      const customerId =
-        typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
-      if (!customerId) continue;
-
-      // Push next charge forward immediately so overlapping cron runs don't double-bill.
-      const nextUnix = now + Math.max(testMinutes, 1) * 60;
-      await stripe.subscriptions.update(subscriptionId, {
-        metadata: {
-          ...sub.metadata,
-          next_charge_at: String(nextUnix),
-        },
-      });
-
-      const invoice = await stripe.invoices.create({
-        customer: customerId,
-        subscription: subscriptionId,
-        auto_advance: true,
-        description: "Membership Auto-Pay (TEST)",
-      });
-
-      let paidInvoice = invoice;
-      if (invoice.status === "draft") {
-        paidInvoice = await stripe.invoices.finalizeInvoice(invoice.id);
-      }
-      if (paidInvoice.status === "open") {
-        try {
-          paidInvoice = await stripe.invoices.pay(paidInvoice.id);
-        } catch (payErr) {
-          console.error("[process-test-autopay] pay failed:", payErr);
-        }
-      }
-
-      results.push({
-        subscriptionId,
-        invoiceId: paidInvoice.id,
-        status: paidInvoice.status,
-        charged: paidInvoice.status === "paid",
-      });
+      const result = await chargeDueSubscription(stripe, supabase, {
+        stripe_subscription_id: row.stripe_subscription_id,
+        user_id: row.user_id,
+        amount: Number(row.amount || 0),
+      }, now);
+      results.push(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Charge failed.";
-      console.error("[process-test-autopay]", subscriptionId, message);
-      results.push({ subscriptionId, error: message });
+      console.error("[process-test-autopay]", row.stripe_subscription_id, message);
+      results.push({ subscriptionId: row.stripe_subscription_id, error: message });
     }
   }
 

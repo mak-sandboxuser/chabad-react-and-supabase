@@ -133,6 +133,7 @@ async function activateTestAutoPay(
       plan_key: planKey,
       charge_day: String(chargeDay),
       contribution_type: "monthly",
+      amount: String(amount),
     },
   });
 
