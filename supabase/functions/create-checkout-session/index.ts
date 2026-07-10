@@ -7,8 +7,22 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-function getTestMinutes() {
-  return Math.max(0, Number(Deno.env.get("AUTO_PAY_TEST_MINUTES") || 0));
+const DEFAULT_TEST_MINUTES = 10;
+
+function isStripeTestMode() {
+  return (Deno.env.get("STRIPE_SECRET_KEY") || "").startsWith("sk_test");
+}
+
+function getTestMinutes(subscription?: Stripe.Subscription | null) {
+  const fromEnv = Number(Deno.env.get("AUTO_PAY_TEST_MINUTES") || 0);
+  if (fromEnv > 0) return fromEnv;
+  if (subscription?.metadata?.test_mode === "true") {
+    const fromMeta = Number(subscription.metadata.test_minutes || DEFAULT_TEST_MINUTES);
+    return fromMeta > 0 ? fromMeta : DEFAULT_TEST_MINUTES;
+  }
+  // Test Stripe keys → charge every 10 minutes by default
+  if (isStripeTestMode()) return DEFAULT_TEST_MINUTES;
+  return 0;
 }
 
 /** After each paid invoice in test mode, push next charge N minutes out via trial_end. */
@@ -16,11 +30,15 @@ async function scheduleNextTestCharge(stripe: Stripe, subscriptionId: string, te
   if (!testMinutes || testMinutes <= 0) return null;
   const nextUnix = Math.floor(Date.now() / 1000) + Math.max(testMinutes, 1) * 60;
   try {
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+    if (sub.status === "canceled" || sub.status === "incomplete_expired") {
+      return null;
+    }
     await stripe.subscriptions.update(subscriptionId, {
       trial_end: nextUnix,
       proration_behavior: "none",
     });
-    console.log(`[auto-pay-test] next charge scheduled at ${new Date(nextUnix * 1000).toISOString()}`);
+    console.log(`[auto-pay-test] next charge in ${testMinutes}m at ${new Date(nextUnix * 1000).toISOString()}`);
     return new Date(nextUnix * 1000).toISOString();
   } catch (err) {
     console.error("[auto-pay-test] scheduleNextTestCharge failed:", err);
@@ -231,7 +249,7 @@ async function activateAutoPay(
 
   const sub = await stripe.subscriptions.retrieve(subscriptionId);
   const amount = (sub.items.data[0]?.price?.unit_amount || 0) / 100;
-  const testMinutes = getTestMinutes() || (sub.metadata?.test_mode === "true" ? 10 : 0);
+  const testMinutes = getTestMinutes() || (sub.metadata?.test_mode === "true" ? DEFAULT_TEST_MINUTES : 0);
   const chargeDay = Math.min(new Date().getUTCDate(), 28);
 
   const { data: existingRow } = await supabase

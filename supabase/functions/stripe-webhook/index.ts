@@ -10,6 +10,9 @@ function getTestMinutes(subscription?: Stripe.Subscription | null) {
     const fromMeta = Number(subscription.metadata.test_minutes || DEFAULT_TEST_MINUTES);
     return fromMeta > 0 ? fromMeta : DEFAULT_TEST_MINUTES;
   }
+  if ((Deno.env.get("STRIPE_SECRET_KEY") || "").startsWith("sk_test")) {
+    return DEFAULT_TEST_MINUTES;
+  }
   return 0;
 }
 
@@ -17,11 +20,15 @@ async function scheduleNextTestCharge(stripe: Stripe, subscriptionId: string, te
   if (!testMinutes || testMinutes <= 0) return null;
   const nextUnix = Math.floor(Date.now() / 1000) + Math.max(testMinutes, 1) * 60;
   try {
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+    if (sub.status === "canceled" || sub.status === "incomplete_expired") {
+      return null;
+    }
     await stripe.subscriptions.update(subscriptionId, {
       trial_end: nextUnix,
       proration_behavior: "none",
     });
-    console.log(`[auto-pay-test] next charge scheduled at ${new Date(nextUnix * 1000).toISOString()}`);
+    console.log(`[auto-pay-test] next charge in ${testMinutes}m at ${new Date(nextUnix * 1000).toISOString()}`);
     return new Date(nextUnix * 1000).toISOString();
   } catch (err) {
     console.error("[auto-pay-test] scheduleNextTestCharge failed:", err);
@@ -184,7 +191,10 @@ async function activateAutoPay(
       : session.subscription?.id;
 
   if (!userId || !subscriptionId) {
-    return new Response("Missing subscription information.", { status: 400 });
+    console.warn("[stripe-webhook] checkout: missing subscription info", session.id);
+    return new Response(JSON.stringify({ received: true, skipped: "missing_subscription" }), {
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const sub = await stripe.subscriptions.retrieve(subscriptionId);
@@ -321,7 +331,10 @@ async function recordCompletedSession(
   const referenceNumber = session.id;
 
   if (!userId) {
-    return new Response("Missing user_id in session metadata.", { status: 400 });
+    console.warn("[stripe-webhook] checkout: missing user_id", session.id);
+    return new Response(JSON.stringify({ received: true, skipped: "missing_user" }), {
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   if (session.mode === "subscription") {
@@ -429,9 +442,12 @@ async function recordInvoicePaid(
   }
 
   const sub = await stripe.subscriptions.retrieve(subscriptionId);
-  const userId = sub.metadata?.user_id;
+  const userId = await resolveUserId(supabase, stripe, sub);
   if (!userId) {
-    return new Response("Missing user_id on subscription.", { status: 400 });
+    console.warn("[stripe-webhook] invoice.paid: no user_id for subscription", subscriptionId);
+    return new Response(JSON.stringify({ received: true, skipped: "no_user" }), {
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const testMinutes = getTestMinutes(sub);
@@ -451,6 +467,13 @@ async function recordInvoicePaid(
     .maybeSingle();
 
   if (existing) {
+    if (testMinutes > 0) {
+      try {
+        await scheduleNextTestCharge(stripe, subscriptionId, testMinutes);
+      } catch (err) {
+        console.error("[stripe-webhook] reschedule after duplicate failed:", err);
+      }
+    }
     return new Response(JSON.stringify({ received: true, alreadyRecorded: true }), {
       headers: { "Content-Type": "application/json" },
     });
@@ -469,10 +492,15 @@ async function recordInvoicePaid(
     description: testMinutes > 0 ? "Membership Auto-Pay (TEST)" : "Monthly Membership Auto-Pay",
   });
 
-  const nextChargeIso = testMinutes > 0
-    ? await scheduleNextTestCharge(stripe, subscriptionId, testMinutes)
-    : new Date(sub.current_period_end * 1000).toISOString();
-  const nextCharge = (nextChargeIso || new Date().toISOString()).slice(0, 10);
+  let nextCharge = new Date(sub.current_period_end * 1000).toISOString().slice(0, 10);
+  if (testMinutes > 0) {
+    try {
+      const nextChargeIso = await scheduleNextTestCharge(stripe, subscriptionId, testMinutes);
+      if (nextChargeIso) nextCharge = nextChargeIso.slice(0, 10);
+    } catch (err) {
+      console.error("[stripe-webhook] scheduleNextTestCharge failed:", err);
+    }
+  }
 
   await supabase
     .from("recurring_contributions")
@@ -498,6 +526,71 @@ async function recordInvoicePaid(
   return new Response(JSON.stringify({ received: true }), {
     headers: { "Content-Type": "application/json" },
   });
+}
+
+async function resolveUserId(
+  supabase: ReturnType<typeof createClient>,
+  stripe: Stripe,
+  subscription: Stripe.Subscription,
+): Promise<string | null> {
+  if (subscription.metadata?.user_id) {
+    return subscription.metadata.user_id;
+  }
+
+  const customerId =
+    typeof subscription.customer === "string"
+      ? subscription.customer
+      : subscription.customer?.id;
+
+  if (!customerId) return null;
+
+  try {
+    const customer = await stripe.customers.retrieve(customerId);
+    if (!customer.deleted && customer.metadata?.supabase_user_id) {
+      return customer.metadata.supabase_user_id;
+    }
+  } catch {
+    // Fall through to profiles lookup.
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("stripe_customer_id", customerId)
+    .maybeSingle();
+
+  return profile?.id || null;
+}
+
+async function handleSubscriptionUpdated(
+  supabase: ReturnType<typeof createClient>,
+  subscription: Stripe.Subscription,
+) {
+  const testMinutes = getTestMinutes(subscription);
+  const amount = (subscription.items.data[0]?.price?.unit_amount || 0) / 100;
+
+  let nextCharge: string;
+  if (testMinutes > 0 && subscription.trial_end && subscription.status === "trialing") {
+    nextCharge = new Date(subscription.trial_end * 1000).toISOString().slice(0, 10);
+  } else if (subscription.current_period_end) {
+    nextCharge = new Date(subscription.current_period_end * 1000).toISOString().slice(0, 10);
+  } else {
+    nextCharge = new Date().toISOString().slice(0, 10);
+  }
+
+  await supabase
+    .from("recurring_contributions")
+    .update({
+      amount,
+      next_charge_date: nextCharge,
+      status: ["active", "trialing"].includes(subscription.status) ? "active" : "cancelled",
+    })
+    .eq("stripe_subscription_id", subscription.id);
+
+  return new Response(
+    JSON.stringify({ received: true }),
+    { headers: { "Content-Type": "application/json" } },
+  );
 }
 
 async function handleSubscriptionCancelled(
@@ -526,87 +619,69 @@ async function handleSubscriptionCancelled(
 }
 
 Deno.serve(async (req) => {
-  const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
-  const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-
-  if (!stripeSecret || !webhookSecret || !supabaseUrl || !serviceKey) {
-    return new Response("Missing configuration.", { status: 500 });
-  }
-
-  const stripe = new Stripe(stripeSecret, { apiVersion: "2023-10-16" });
-  const supabase = createClient(supabaseUrl, serviceKey);
-
-  const signature = req.headers.get("stripe-signature");
-  if (!signature) {
-    return new Response("Missing stripe-signature header.", { status: 400 });
-  }
-
-  const body = await req.text();
-
-  let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Webhook verification failed.";
-    return new Response(message, { status: 400 });
-  }
+    const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
+    const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object as Stripe.Checkout.Session;
-    return await recordCompletedSession(supabase, session, stripe);
-  }
-
-  if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
-    const invoice = event.data.object as Stripe.Invoice;
-    return await recordInvoicePaid(supabase, stripe, invoice);
-  }
-
-  if (event.type === "customer.subscription.updated") {
-  const subscription = event.data.object as Stripe.Subscription;
-  return await handleSubscriptionUpdated(supabase, subscription);
-}
-
-  if (event.type === "customer.subscription.deleted") {
-    const subscription = event.data.object as Stripe.Subscription;
-    return await handleSubscriptionCancelled(supabase, subscription);
-  }
-
-  return new Response(JSON.stringify({ received: true }), {
-    headers: { "Content-Type": "application/json" },
-  });
-});
-
-async function handleSubscriptionUpdated(
-  supabase: ReturnType<typeof createClient>,
-  subscription: Stripe.Subscription,
-) {
-  const testMinutes = getTestMinutes(subscription);
-  const amount = (subscription.items.data[0]?.price?.unit_amount || 0) / 100;
-
-  let nextCharge: string;
-  if (testMinutes > 0 && subscription.trial_end && subscription.status === "trialing") {
-    nextCharge = new Date(subscription.trial_end * 1000).toISOString().slice(0, 10);
-  } else {
-    nextCharge = new Date(subscription.current_period_end * 1000).toISOString().slice(0, 10);
-  }
-
-  await supabase
-    .from("recurring_contributions")
-    .update({
-      amount,
-      next_charge_date: nextCharge,
-      status: ["active", "trialing"].includes(subscription.status) ? "active" : "cancelled",
-    })
-    .eq("stripe_subscription_id", subscription.id);
-
-  return new Response(
-    JSON.stringify({ received: true }),
-    {
-      headers: {
-        "Content-Type": "application/json",
-      },
+    if (!stripeSecret || !webhookSecret || !supabaseUrl || !serviceKey) {
+      return new Response("Missing configuration.", { status: 500 });
     }
-  );
-}
+
+    const stripe = new Stripe(stripeSecret, { apiVersion: "2023-10-16" });
+    const supabase = createClient(supabaseUrl, serviceKey);
+
+    const signature = req.headers.get("stripe-signature");
+    if (!signature) {
+      return new Response("Missing stripe-signature header.", { status: 400 });
+    }
+
+    const body = await req.text();
+
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Webhook verification failed.";
+      console.error("[stripe-webhook] signature verification failed:", message);
+      return new Response(message, { status: 400 });
+    }
+
+    console.log("[stripe-webhook] event:", event.type, event.id);
+
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as Stripe.Checkout.Session;
+      return await recordCompletedSession(supabase, session, stripe);
+    }
+
+    if (
+      event.type === "invoice.paid" ||
+      event.type === "invoice.payment_succeeded"
+    ) {
+      const invoice = event.data.object as Stripe.Invoice;
+      return await recordInvoicePaid(supabase, stripe, invoice);
+    }
+
+    if (event.type === "customer.subscription.updated") {
+      const subscription = event.data.object as Stripe.Subscription;
+      return await handleSubscriptionUpdated(supabase, subscription);
+    }
+
+    if (event.type === "customer.subscription.deleted") {
+      const subscription = event.data.object as Stripe.Subscription;
+      return await handleSubscriptionCancelled(supabase, subscription);
+    }
+
+    return new Response(JSON.stringify({ received: true }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Webhook handler failed.";
+    console.error("[stripe-webhook] unhandled error:", err);
+    return new Response(JSON.stringify({ error: message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+});
