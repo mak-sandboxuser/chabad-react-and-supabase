@@ -1,7 +1,27 @@
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
-const AUTO_PAY_DAY = 5;
+const DEFAULT_TEST_MINUTES = 10;
+
+function getTestMinutes(subscription?: Stripe.Subscription | null) {
+  const fromEnv = Number(Deno.env.get("AUTO_PAY_TEST_MINUTES") || 0);
+  if (fromEnv > 0) return fromEnv;
+  if (subscription?.metadata?.test_mode === "true") {
+    const fromMeta = Number(subscription.metadata.test_minutes || DEFAULT_TEST_MINUTES);
+    return fromMeta > 0 ? fromMeta : DEFAULT_TEST_MINUTES;
+  }
+  return 0;
+}
+
+async function scheduleNextTestCharge(stripe: Stripe, subscriptionId: string, testMinutes: number) {
+  if (!testMinutes || testMinutes <= 0) return null;
+  const nextUnix = Math.floor(Date.now() / 1000) + testMinutes * 60;
+  await stripe.subscriptions.update(subscriptionId, {
+    trial_end: nextUnix,
+    proration_behavior: "none",
+  });
+  return new Date(nextUnix * 1000).toISOString();
+}
 
 async function insertDashboardPayment(
   supabase: ReturnType<typeof createClient>,
@@ -163,7 +183,8 @@ async function activateAutoPay(
 
   const sub = await stripe.subscriptions.retrieve(subscriptionId);
   const amount = (sub.items.data[0]?.price?.unit_amount || 0) / 100;
-  const nextCharge = new Date(sub.current_period_end * 1000).toISOString().slice(0, 10);
+  const testMinutes = getTestMinutes(sub);
+  const chargeDay = Math.min(new Date().getUTCDate(), 28);
 
   const { data: existingRow } = await supabase
     .from("recurring_contributions")
@@ -178,6 +199,15 @@ async function activateAutoPay(
 
   if (existingRow?.status === "active") {
     await recordSubscriptionCharge(supabase, stripe, userId, subscriptionId, sessionFallback);
+    const nextChargeIso = testMinutes > 0
+      ? await scheduleNextTestCharge(stripe, subscriptionId, testMinutes)
+      : new Date(sub.current_period_end * 1000).toISOString();
+    if (nextChargeIso) {
+      await supabase
+        .from("recurring_contributions")
+        .update({ next_charge_date: nextChargeIso.slice(0, 10) })
+        .eq("stripe_subscription_id", subscriptionId);
+    }
     return new Response(JSON.stringify({ received: true, alreadyActive: true }), {
       headers: { "Content-Type": "application/json" },
     });
@@ -206,26 +236,38 @@ async function activateAutoPay(
     .eq("status", "active")
     .neq("stripe_subscription_id", subscriptionId);
 
+  await recordSubscriptionCharge(supabase, stripe, userId, subscriptionId, sessionFallback);
+
+  const nextChargeIso = testMinutes > 0
+    ? await scheduleNextTestCharge(stripe, subscriptionId, testMinutes)
+    : new Date(sub.current_period_end * 1000).toISOString();
+  const nextChargeDate = (nextChargeIso || new Date().toISOString()).slice(0, 10);
+
   if (existingRow) {
     await supabase
       .from("recurring_contributions")
       .update({
         amount,
-        next_charge_date: nextCharge,
+        next_charge_date: nextChargeDate,
         status: "active",
-        charge_day_of_month: AUTO_PAY_DAY,
+        charge_day_of_month: chargeDay,
+        description: testMinutes > 0
+          ? `Membership Auto-Pay (TEST every ${testMinutes} min)`
+          : "Membership Auto-Pay (same date each month)",
       })
       .eq("id", existingRow.id);
   } else {
     await supabase.from("recurring_contributions").insert({
       user_id: userId,
-      description: "Monthly Membership Auto-Pay (5th of each month)",
+      description: testMinutes > 0
+        ? `Membership Auto-Pay (TEST every ${testMinutes} min)`
+        : "Membership Auto-Pay (same date each month)",
       amount,
       frequency: "monthly",
-      next_charge_date: nextCharge,
+      next_charge_date: nextChargeDate,
       status: "active",
       stripe_subscription_id: subscriptionId,
-      charge_day_of_month: AUTO_PAY_DAY,
+      charge_day_of_month: chargeDay,
     });
   }
 
@@ -247,13 +289,13 @@ async function activateAutoPay(
       await supabase.from("notifications").insert({
         user_id: userId,
         title: "Auto-Pay Enabled",
-        body: `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. ₹${amount.toLocaleString("en-IN")} will be charged automatically on the ${AUTO_PAY_DAY}th of each month.`,
+        body: testMinutes > 0
+          ? `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. TEST mode: next charge in ${testMinutes} minutes.`
+          : `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. Auto-pay will charge the same amount on this date each month.`,
         type: "payment",
       });
     }
   }
-
-  await recordSubscriptionCharge(supabase, stripe, userId, subscriptionId, sessionFallback);
 
   return new Response(JSON.stringify({ received: true }), {
     headers: { "Content-Type": "application/json" },
@@ -407,11 +449,25 @@ async function recordInvoicePaid(
     paidAt,
   });
 
-  const nextCharge = new Date(sub.current_period_end * 1000).toISOString().slice(0, 10);
+  const testMinutes = getTestMinutes(sub);
+  const nextChargeIso = testMinutes > 0
+    ? await scheduleNextTestCharge(stripe, subscriptionId, testMinutes)
+    : new Date(sub.current_period_end * 1000).toISOString();
+  const nextCharge = (nextChargeIso || new Date().toISOString()).slice(0, 10);
+
   await supabase
     .from("recurring_contributions")
     .update({ next_charge_date: nextCharge, amount, status: "active" })
     .eq("stripe_subscription_id", subscriptionId);
+
+  await supabase.from("notifications").insert({
+    user_id: userId,
+    title: testMinutes > 0 ? "Test Auto-Pay Successful" : "Auto-Pay Successful",
+    body: testMinutes > 0
+      ? `₹${amount.toLocaleString("en-IN")} charged. Next TEST charge in ${testMinutes} minutes.`
+      : `Your monthly contribution of ₹${amount.toLocaleString("en-IN")} was charged automatically.`,
+    type: "payment",
+  });
 
   return new Response(JSON.stringify({ received: true }), {
     headers: { "Content-Type": "application/json" },

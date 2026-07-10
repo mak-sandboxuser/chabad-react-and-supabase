@@ -13,21 +13,22 @@ import { formatCurrency, getPlanMonthlyAmount, PLAN_LABELS } from "../../lib/for
 import { fetchMembership, getAuthUser } from "../../services/memberData";
 import {
   createStripeCheckoutSession,
-  fetchPendingBillingRecord,
   verifyStripeCheckoutSession,
 } from "../../services/stripePayments";
+
+const TEST_MINUTES = Number(import.meta.env.VITE_AUTO_PAY_TEST_MINUTES || 10);
+const TEST_MODE = String(import.meta.env.VITE_AUTO_PAY_TEST_MODE || "true").toLowerCase() !== "false";
 
 export default function MakePaymentPage() {
   const { userName, notificationCount } = useCurrentUser();
   const [searchParams, setSearchParams] = useSearchParams();
   const [paying, setPaying] = useState(false);
-  const [defaultAmount, setDefaultAmount] = useState("200");
+  const [defaultAmount, setDefaultAmount] = useState("100");
   const [planLabel, setPlanLabel] = useState("Membership");
   const [planKey, setPlanKey] = useState("");
-  const [billingRecordId, setBillingRecordId] = useState(null);
   const [paymentData, setPaymentData] = useState({
-    amount: "200",
-    contributionType: "Monthly Membership",
+    amount: "100",
+    contributionType: "Monthly Membership Auto-Pay",
   });
   const [verifyState, setVerifyState] = useState({
     loading: false,
@@ -35,49 +36,35 @@ export default function MakePaymentPage() {
     amount: null,
     autoPay: false,
     nextChargeDate: null,
+    testMode: false,
     paymentRecorded: false,
     error: "",
   });
 
-  const success = searchParams.get("success") === "true";
   const subscriptionSuccess = searchParams.get("subscription") === "success";
+  const success = searchParams.get("success") === "true";
   const canceled = searchParams.get("canceled") === "true";
   const sessionId = searchParams.get("session_id");
+  const paidSuccess = success || subscriptionSuccess;
 
   useEffect(() => {
     const loadDefaults = async () => {
       try {
         const user = await getAuthUser();
-        const [membership, pendingBill] = await Promise.all([
-          fetchMembership(user.id),
-          fetchPendingBillingRecord(user.id).catch(() => null),
-        ]);
+        const membership = await fetchMembership(user.id);
+        const key = membership?.plan_key?.toLowerCase() || "";
+        const monthly = getPlanMonthlyAmount(key, membership?.monthly_amount);
+        const label = key ? PLAN_LABELS[key] : "Membership";
 
-        const planKey = membership?.plan_key?.toLowerCase();
-        const catalogMonthly = getPlanMonthlyAmount(planKey, membership?.monthly_amount);
-        const billAmount = Number(pendingBill?.amount || 0);
-        const monthly =
-          billAmount > 0 && billAmount <= 1000 ? billAmount : catalogMonthly;
-
-        const planLabel = planKey ? PLAN_LABELS[planKey] : "Membership";
-
-        setPlanLabel(planLabel);
-        setPlanKey(planKey || "");
+        setPlanLabel(label);
+        setPlanKey(key);
         setDefaultAmount(String(monthly));
         setPaymentData({
           amount: String(monthly),
-          contributionType: pendingBill?.plan_name
-            ? `Monthly — ${pendingBill.plan_name}`
-            : `Monthly — ${planLabel} Membership`,
+          contributionType: `Monthly — ${label} Membership Auto-Pay`,
         });
-
-        if (pendingBill?.id && billAmount > 0 && billAmount <= 1000) {
-          setBillingRecordId(pendingBill.id);
-        } else {
-          setBillingRecordId(null);
-        }
       } catch {
-        setDefaultAmount("200");
+        setDefaultAmount("100");
       }
     };
 
@@ -87,7 +74,16 @@ export default function MakePaymentPage() {
   const verifiedSessionRef = useRef(null);
 
   const runVerification = async (id) => {
-    setVerifyState({ loading: true, verified: false, amount: null, autoPay: false, nextChargeDate: null, paymentRecorded: false, error: "" });
+    setVerifyState({
+      loading: true,
+      verified: false,
+      amount: null,
+      autoPay: false,
+      nextChargeDate: null,
+      testMode: false,
+      paymentRecorded: false,
+      error: "",
+    });
     try {
       const result = await verifyStripeCheckoutSession(id);
       setVerifyState({
@@ -96,15 +92,16 @@ export default function MakePaymentPage() {
         amount: result.amount,
         autoPay: Boolean(result.autoPay),
         nextChargeDate: result.nextChargeDate || null,
+        testMode: Boolean(result.testMode),
         paymentRecorded: Boolean(result.paymentRecorded),
         error: "",
       });
       setPaymentData((prev) => ({
         ...prev,
         amount: String(result.amount),
-        contributionType: result.autoPay
-          ? "Auto-Pay Enabled (5th of each month)"
-          : "Membership Contribution (Paid)",
+        contributionType: result.testMode
+          ? `Auto-Pay active (every ${TEST_MINUTES} min — test)`
+          : "Auto-Pay active (same date each month)",
       }));
     } catch (err) {
       setVerifyState({
@@ -113,6 +110,7 @@ export default function MakePaymentPage() {
         amount: null,
         autoPay: false,
         nextChargeDate: null,
+        testMode: false,
         paymentRecorded: false,
         error: err.message || "Payment verification failed.",
       });
@@ -120,30 +118,26 @@ export default function MakePaymentPage() {
   };
 
   useEffect(() => {
-    if ((!success && !subscriptionSuccess) || !sessionId) return;
+    if (!paidSuccess || !sessionId) return;
     if (verifiedSessionRef.current === sessionId) return;
     verifiedSessionRef.current = sessionId;
     runVerification(sessionId);
-  }, [success, subscriptionSuccess, sessionId]);
+  }, [paidSuccess, sessionId]);
 
-  const handlePayWithStripe = async ({ amount, description, notes, contributionType, autoPay }) => {
+  const handlePayWithStripe = async ({ amount, description, notes }) => {
     setPaying(true);
     try {
-      const isMonthly = contributionType === "monthly";
       setPaymentData({
         amount: String(amount),
-        contributionType: isMonthly
-          ? `${planLabel} Membership — Monthly Auto-Pay`
-          : "One-time Contribution",
+        contributionType: `${planLabel} Membership — Monthly Auto-Pay`,
       });
 
       const { url } = await createStripeCheckoutSession({
         amount,
         description,
         notes,
-        contributionType,
-        billingRecordId: isMonthly ? null : billingRecordId,
-        autoPay: isMonthly,
+        contributionType: "monthly",
+        autoPay: true,
         planKey,
       });
 
@@ -155,7 +149,16 @@ export default function MakePaymentPage() {
 
   const dismissStatus = () => {
     setSearchParams({});
-    setVerifyState({ loading: false, verified: false, amount: null, autoPay: false, nextChargeDate: null, paymentRecorded: false, error: "" });
+    setVerifyState({
+      loading: false,
+      verified: false,
+      amount: null,
+      autoPay: false,
+      nextChargeDate: null,
+      testMode: false,
+      paymentRecorded: false,
+      error: "",
+    });
   };
 
   const summaryAmount =
@@ -163,7 +166,15 @@ export default function MakePaymentPage() {
       ? String(verifyState.amount)
       : paymentData.amount;
 
-  const summaryType = paymentData.contributionType;
+  const nextChargeLabel = verifyState.nextChargeDate
+    ? new Date(verifyState.nextChargeDate).toLocaleString("en-IN", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : null;
 
   return (
     <div className="flex h-screen bg-[#f4f6fb] overflow-hidden">
@@ -172,29 +183,34 @@ export default function MakePaymentPage() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <TopBar userName={userName} notificationCount={notificationCount} title="Make a Payment" />
         <div className="bg-white px-6 -mt-px pb-3 border-b border-gray-100">
-          <p className="text-[13px] text-gray-400">Pay your membership contribution securely with Stripe.</p>
+          <p className="text-[13px] text-gray-400">
+            Pay your membership monthly amount and enable Auto-Pay with Stripe.
+          </p>
         </div>
 
         <div className="flex-1 overflow-y-auto">
           <div className="flex">
             <main className="flex-1 p-6 space-y-5 min-w-0">
-              {(success || subscriptionSuccess) && verifyState.loading && (
+              {paidSuccess && verifyState.loading && (
                 <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-[13px] text-blue-800">
                   Confirming your payment with Stripe...
                 </div>
               )}
 
-              {(success || subscriptionSuccess) && verifyState.verified && (
+              {paidSuccess && verifyState.verified && (
                 <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-4">
                   <p className="text-[14px] font-semibold text-green-800">
-                    {verifyState.autoPay ? "Membership payment & auto-pay active" : "Payment complete"}
+                    Membership payment & Auto-Pay active
                   </p>
                   <p className="text-[13px] text-green-700 mt-1">
-                    {verifyState.autoPay
-                      ? verifyState.paymentRecorded
-                        ? `${formatCurrency(verifyState.amount)} was charged for your first month. Auto-pay is active — future charges on the 5th of each month.`
-                        : `${formatCurrency(verifyState.amount)} monthly plan is active. Your card is saved for automatic billing on the 5th of each month.`
-                      : `${formatCurrency(verifyState.amount)} was recorded successfully. Your dashboard is updated.`}
+                    {verifyState.paymentRecorded
+                      ? `${formatCurrency(verifyState.amount)} was charged and added to your dashboard.`
+                      : `${formatCurrency(verifyState.amount)} Auto-Pay is active.`}
+                    {verifyState.testMode
+                      ? ` Next test charge in about ${TEST_MINUTES} minutes${nextChargeLabel ? ` (${nextChargeLabel})` : ""}.`
+                      : nextChargeLabel
+                        ? ` Next charge: ${nextChargeLabel}.`
+                        : " Future charges will run on this date each month."}
                   </p>
                   <div className="flex items-center gap-3 mt-3">
                     <Link
@@ -210,17 +226,13 @@ export default function MakePaymentPage() {
                 </div>
               )}
 
-              {(success || subscriptionSuccess) && verifyState.error && (
+              {paidSuccess && verifyState.error && (
                 <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">
                   {verifyState.error}
-                  <p className="mt-2 text-[12px]">
-                    Redeploy the Edge Function: <code>supabase functions deploy create-checkout-session</code>
-                    {" "}and set secret <code>SUPABASE_SERVICE_ROLE_KEY</code>.
-                  </p>
                   <button
                     type="button"
                     onClick={() => sessionId && runVerification(sessionId)}
-                    className="mt-2 text-[12px] font-semibold text-red-700 underline"
+                    className="mt-2 block text-[12px] font-semibold text-red-700 underline"
                   >
                     Retry verification
                   </button>
@@ -241,13 +253,16 @@ export default function MakePaymentPage() {
                 </div>
               )}
 
-              {!success && !subscriptionSuccess && (
+              {!paidSuccess && (
                 <>
                   <PaymentStepper currentStep={1} />
                   <EncouragementBanner />
                   <PaymentDetailsForm
                     defaultAmount={defaultAmount}
                     planLabel={planLabel}
+                    planKey={planKey}
+                    testMode={TEST_MODE}
+                    testMinutes={TEST_MINUTES}
                     onPayWithStripe={handlePayWithStripe}
                     paying={paying}
                   />
@@ -266,7 +281,7 @@ export default function MakePaymentPage() {
             <aside className="w-[300px] shrink-0 p-5 space-y-5 overflow-y-auto">
               <PaymentSummary
                 amount={summaryAmount}
-                contributionType={summaryType}
+                contributionType={paymentData.contributionType}
                 processingFee="0"
                 paid={verifyState.verified}
               />

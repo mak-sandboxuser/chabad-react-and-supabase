@@ -339,9 +339,9 @@ export function buildDashboardData({ profile, user, membership, payments, contri
       autoPayEnabled: Boolean(activeAutoPay),
       autoPayDay: activeAutoPay?.charge_day_of_month || 5,
     },
-    recentPayments: payments.slice(0, 5).map((item) => ({
+    recentPayments: payments.map((item) => ({
       date: formatShortDate(item.paid_at || item.created_at),
-      description: item.description || "Contribution",
+      description: item.description || "Membership Auto-Pay",
       amount: formatCurrency(item.amount),
       status: item.status === "paid" ? "Paid" : (item.status || "Paid"),
     })),

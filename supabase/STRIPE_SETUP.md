@@ -69,54 +69,45 @@ Run in Supabase SQL Editor:
 
 Payment is saved to `payments` table and a notification is created after webhook fires.
 
-## 7. Test Auto-Pay (monthly on the 5th)
+## 7. Test Auto-Pay (every 10 minutes)
 
-Stripe cannot bill every 10 minutes on a real monthly plan. Use one of these approaches:
+Membership payments are **subscription Auto-Pay only** (no one-time option).
 
-### Option A — Test first charge in 10 minutes (recommended)
+Plans:
+- Basic: ₹1,200/year → ₹100/month
+- Standard: ₹2,400/year → ₹200/month
+- Premium: ₹3,600/year → ₹300/month
 
-Use **test keys only** (`sk_test_...`). Set a temporary Supabase secret, redeploy, then enable auto-pay:
+### Enable 10-minute test billing
 
 ```bash
 supabase secrets set AUTO_PAY_TEST_MINUTES=10
 supabase functions deploy create-checkout-session
+supabase functions deploy stripe-webhook --no-verify-jwt
 ```
 
-1. Log in → **Payments** → check **Pay automatically every month on the 5th**
-2. Complete Stripe Checkout with test card `4242 4242 4242 4242`
-3. Wait ~10 minutes — Stripe fires `invoice.paid` when the trial ends
-4. Check **Dashboard → Recent Payments** and **Notifications**
+1. Sign up with a plan → **Payments** → enable **Auto-Pay** → pay with test card `4242 4242 4242 4242`
+2. First charge happens **immediately** and appears on the dashboard (Total Contributed + All Payments)
+3. Every **10 minutes**, Stripe charges again; each charge is saved to `payments` and updates the dashboard
+4. Webhook must include `invoice.paid` (see section 4)
 
-Remove test mode when done:
+### Turn off test mode (production monthly)
 
 ```bash
 supabase secrets unset AUTO_PAY_TEST_MINUTES
 supabase functions deploy create-checkout-session
+supabase functions deploy stripe-webhook --no-verify-jwt
 ```
 
-### Option B — Instant test (no waiting)
+Production renews on the **same date each month** as the first payment.
 
-Verify the webhook and database path without waiting:
+Also set frontend (optional UI copy):
 
-1. Ensure webhook listens for `invoice.paid` (see section 4)
-2. In [Stripe Dashboard → Developers → Webhooks](https://dashboard.stripe.com/test/webhooks), open your endpoint
-3. Click **Send test event** → choose `invoice.paid` → Send
-4. Or use Stripe CLI:
-
-```bash
-stripe listen --forward-to https://YOUR_PROJECT.supabase.co/functions/v1/stripe-webhook
-stripe trigger invoice.paid
+```env
+VITE_AUTO_PAY_TEST_MODE=true
+VITE_AUTO_PAY_TEST_MINUTES=10
 ```
 
-Note: CLI test events use fake data — good for webhook wiring, not for your exact user row. Option A is better for end-to-end testing.
-
-### Option C — Stripe Test Clocks (advance time manually)
-
-1. Stripe Dashboard → **Developers → Test clocks** → Create clock
-2. Create the subscription customer attached to that clock
-3. After setup, advance the clock by 10+ minutes to trigger the invoice
-
-More setup, but closest to production billing simulation.
 
 ### Checklist before testing
 

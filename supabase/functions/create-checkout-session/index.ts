@@ -7,22 +7,19 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const AUTO_PAY_DAY = 5;
-
-function getNextAutoPayAnchor(dayOfMonth: number) {
-  const now = new Date();
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
-  const currentDay = now.getUTCDate();
-
-  const anchorMonth = currentDay < dayOfMonth ? month : month + 1;
-  const anchorDate = new Date(Date.UTC(year, anchorMonth, dayOfMonth, 0, 0, 0));
-  return Math.floor(anchorDate.getTime() / 1000);
+function getTestMinutes() {
+  return Math.max(0, Number(Deno.env.get("AUTO_PAY_TEST_MINUTES") || 0));
 }
 
-function getAnchorFromNow(minutesFromNow: number) {
-  const safeMinutes = Math.max(1, Math.floor(minutesFromNow));
-  return Math.floor(Date.now() / 1000) + safeMinutes * 60;
+/** After each paid invoice in test mode, push next charge N minutes out via trial_end. */
+async function scheduleNextTestCharge(stripe: Stripe, subscriptionId: string, testMinutes: number) {
+  if (!testMinutes || testMinutes <= 0) return null;
+  const nextUnix = Math.floor(Date.now() / 1000) + testMinutes * 60;
+  await stripe.subscriptions.update(subscriptionId, {
+    trial_end: nextUnix,
+    proration_behavior: "none",
+  });
+  return new Date(nextUnix * 1000).toISOString();
 }
 
 function resolveReturnBaseUrl(requested: unknown, fallback: string) {
@@ -228,7 +225,8 @@ async function activateAutoPay(
 
   const sub = await stripe.subscriptions.retrieve(subscriptionId);
   const amount = (sub.items.data[0]?.price?.unit_amount || 0) / 100;
-  const nextCharge = new Date(sub.current_period_end * 1000).toISOString().slice(0, 10);
+  const testMinutes = getTestMinutes() || (sub.metadata?.test_mode === "true" ? 10 : 0);
+  const chargeDay = Math.min(new Date().getUTCDate(), 28);
 
   const { data: existingRow } = await supabase
     .from("recurring_contributions")
@@ -249,12 +247,22 @@ async function activateAutoPay(
       subscriptionId,
       sessionFallback,
     );
+    const nextChargeIso = testMinutes > 0
+      ? await scheduleNextTestCharge(stripe, subscriptionId, testMinutes)
+      : new Date(sub.current_period_end * 1000).toISOString();
+    if (nextChargeIso) {
+      await supabase
+        .from("recurring_contributions")
+        .update({ next_charge_date: nextChargeIso.slice(0, 10) })
+        .eq("stripe_subscription_id", subscriptionId);
+    }
     return {
       amount: paymentResult.amount || amount,
-      nextCharge,
+      nextCharge: nextChargeIso,
       subscriptionId,
       alreadyActive: true,
       paymentRecorded: paymentResult.recorded,
+      testMode: testMinutes > 0,
     };
   }
 
@@ -281,27 +289,45 @@ async function activateAutoPay(
     .eq("status", "active")
     .neq("stripe_subscription_id", subscriptionId);
 
+  const paymentResult = await recordSubscriptionCharge(
+    supabase,
+    stripe,
+    userId,
+    subscriptionId,
+    sessionFallback,
+  );
+
+  const nextChargeIso = testMinutes > 0
+    ? await scheduleNextTestCharge(stripe, subscriptionId, testMinutes)
+    : new Date(sub.current_period_end * 1000).toISOString();
+  const nextChargeDate = (nextChargeIso || new Date().toISOString()).slice(0, 10);
+
   if (existingRow) {
     const { error: updateError } = await supabase
       .from("recurring_contributions")
       .update({
         amount,
-        next_charge_date: nextCharge,
+        next_charge_date: nextChargeDate,
         status: "active",
-        charge_day_of_month: AUTO_PAY_DAY,
+        charge_day_of_month: chargeDay,
+        description: testMinutes > 0
+          ? `Membership Auto-Pay (TEST every ${testMinutes} min)`
+          : "Membership Auto-Pay (same date each month)",
       })
       .eq("id", existingRow.id);
     if (updateError) throw updateError;
   } else {
     const { error: recurringError } = await supabase.from("recurring_contributions").insert({
       user_id: userId,
-      description: "Monthly Membership Auto-Pay (5th of each month)",
+      description: testMinutes > 0
+        ? `Membership Auto-Pay (TEST every ${testMinutes} min)`
+        : "Membership Auto-Pay (same date each month)",
       amount,
       frequency: "monthly",
-      next_charge_date: nextCharge,
+      next_charge_date: nextChargeDate,
       status: "active",
       stripe_subscription_id: subscriptionId,
-      charge_day_of_month: AUTO_PAY_DAY,
+      charge_day_of_month: chargeDay,
     });
     if (recurringError) throw recurringError;
   }
@@ -315,25 +341,20 @@ async function activateAutoPay(
     await supabase.from("notifications").insert({
       user_id: userId,
       title: "Auto-Pay Enabled",
-      body: `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. ₹${amount.toLocaleString("en-IN")} will be charged automatically on the ${AUTO_PAY_DAY}th of each month.`,
+      body: testMinutes > 0
+        ? `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. TEST mode: next charge in ${testMinutes} minutes.`
+        : `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. Auto-pay will charge the same amount on this date each month.`,
       type: "payment",
     });
   }
 
-  const paymentResult = await recordSubscriptionCharge(
-    supabase,
-    stripe,
-    userId,
-    subscriptionId,
-    sessionFallback,
-  );
-
   return {
     amount: paymentResult.amount || amount,
-    nextCharge,
+    nextCharge: nextChargeIso,
     subscriptionId,
     alreadyActive: false,
     paymentRecorded: paymentResult.recorded,
+    testMode: testMinutes > 0,
   };
 }
 
@@ -358,6 +379,7 @@ async function recordCompletedSession(
       autoPay: true,
       nextChargeDate: result.nextCharge,
       paymentRecorded: result.paymentRecorded,
+      testMode: result.testMode || false,
     };
   }
 
@@ -561,20 +583,19 @@ Deno.serve(async (req) => {
         alreadyRecorded: result.alreadyRecorded,
         autoPay: result.autoPay || false,
         nextChargeDate: result.nextChargeDate || null,
-        paymentRecorded: result.paymentRecorded ?? !result.autoPay,
+        paymentRecorded: result.paymentRecorded ?? true,
+        testMode: result.testMode || false,
         paymentStatus: session.payment_status,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // --- CREATE new Stripe checkout session ---
+    // --- CREATE membership Auto-Pay checkout (subscription only) ---
     const amount = Number(body.amount);
-    const description = body.description || "Membership Contribution";
+    const description = body.description || "Membership Monthly Auto-Pay";
     const notes = body.notes || "";
-    const billingRecordId = body.billingRecordId ? String(body.billingRecordId) : "";
-    const isMonthlySubscription =
-      body.autoPay === true || body.contributionType === "monthly";
+    const planKey = body.planKey ? String(body.planKey) : "";
 
     if (!amount || amount < 1) {
       return new Response(JSON.stringify({ error: "Enter a valid payment amount." }), {
@@ -609,69 +630,13 @@ Deno.serve(async (req) => {
         .eq("id", user.id);
     }
 
-    if (isMonthlySubscription) {
-      const testMinutes = Number(Deno.env.get("AUTO_PAY_TEST_MINUTES") || 0);
-      const planKey = body.planKey ? String(body.planKey) : "";
-      const subscriptionData: Record<string, unknown> = {
-        metadata: {
-          user_id: user.id,
-          contribution_type: "monthly",
-          charge_day: String(AUTO_PAY_DAY),
-          plan_key: planKey,
-          test_mode: testMinutes > 0 ? "true" : "false",
-        },
-      };
+    const testMinutes = getTestMinutes();
+    const chargeDay = Math.min(new Date().getUTCDate(), 28);
 
-      if (testMinutes > 0) {
-        // Test only: next charge in N minutes
-        subscriptionData.billing_cycle_anchor = getAnchorFromNow(testMinutes);
-        subscriptionData.proration_behavior = "none";
-      } else {
-        // Production: charge first month at checkout, renew on the 5th each month
-        subscriptionData.billing_cycle_anchor_config = {
-          day_of_month: AUTO_PAY_DAY,
-        };
-      }
-
-      const session = await stripe.checkout.sessions.create({
-        mode: "subscription",
-        customer: customerId,
-        payment_method_types: ["card"],
-        line_items: [
-          {
-            price_data: {
-              currency: "inr",
-              unit_amount: Math.round(amount * 100),
-              product_data: {
-                name: description,
-                description: testMinutes > 0
-                  ? `TEST: first charge in ${testMinutes} minutes`
-                  : `First month now, then ₹${amount}/month on the ${AUTO_PAY_DAY}th`,
-              },
-              recurring: { interval: "month" },
-            },
-            quantity: 1,
-          },
-        ],
-        subscription_data: subscriptionData,
-        metadata: {
-          user_id: user.id,
-          notes,
-          auto_pay: "true",
-          contribution_type: "monthly",
-          plan_key: planKey,
-        },
-        success_url: `${siteUrl}/payments?subscription=success&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${siteUrl}/payments?canceled=true`,
-      });
-
-      return new Response(JSON.stringify({ url: session.url, sessionId: session.id }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
+    // Charge first month now. Production renews monthly on the same date.
+    // Test mode: after first payment, webhook/verify schedules next charge every N minutes.
     const session = await stripe.checkout.sessions.create({
-      mode: "payment",
+      mode: "subscription",
       customer: customerId,
       payment_method_types: ["card"],
       line_items: [
@@ -681,19 +646,34 @@ Deno.serve(async (req) => {
             unit_amount: Math.round(amount * 100),
             product_data: {
               name: description,
-              description: notes || undefined,
+              description: testMinutes > 0
+                ? `Pay now, then TEST auto-charge every ${testMinutes} minutes`
+                : `Pay now, then ₹${amount}/month on this date each month`,
             },
+            recurring: { interval: "month" },
           },
           quantity: 1,
         },
       ],
+      subscription_data: {
+        metadata: {
+          user_id: user.id,
+          contribution_type: "monthly",
+          charge_day: String(chargeDay),
+          plan_key: planKey,
+          test_mode: testMinutes > 0 ? "true" : "false",
+          test_minutes: String(testMinutes || 0),
+        },
+      },
       metadata: {
         user_id: user.id,
         notes,
-        billing_record_id: billingRecordId,
-        contribution_type: body.contributionType || "monthly",
+        auto_pay: "true",
+        contribution_type: "monthly",
+        plan_key: planKey,
+        test_mode: testMinutes > 0 ? "true" : "false",
       },
-      success_url: `${siteUrl}/payments?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${siteUrl}/payments?subscription=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${siteUrl}/payments?canceled=true`,
     });
 

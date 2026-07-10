@@ -21,11 +21,10 @@ async function getEdgeFunctionErrorMessage(error, fallbackMessage) {
 
 export async function createStripeCheckoutSession({
   amount,
-  description = "Membership Contribution",
+  description = "Membership Monthly Auto-Pay",
   notes = "",
   contributionType = "monthly",
-  billingRecordId = null,
-  autoPay = false,
+  autoPay = true,
   planKey = "",
 }) {
   const { data, error } = await supabase.functions.invoke("create-checkout-session", {
@@ -33,9 +32,8 @@ export async function createStripeCheckoutSession({
       amount: Number(amount),
       description,
       notes,
-      contributionType,
-      billingRecordId,
-      autoPay,
+      contributionType: "monthly",
+      autoPay: true,
       planKey,
       returnBaseUrl: window.location.origin,
     },
