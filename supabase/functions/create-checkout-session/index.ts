@@ -25,7 +25,7 @@ function getTestMinutes(subscription?: Stripe.Subscription | null) {
   return 0;
 }
 
-/** After each paid invoice in test mode, push next charge N minutes out via trial_end. */
+/** Schedule next TEST auto-pay charge using billing_cycle_anchor (trial_end requires 2+ days). */
 async function scheduleNextTestCharge(stripe: Stripe, subscriptionId: string, testMinutes: number) {
   if (!testMinutes || testMinutes <= 0) return null;
   const nextUnix = Math.floor(Date.now() / 1000) + Math.max(testMinutes, 1) * 60;
@@ -35,7 +35,7 @@ async function scheduleNextTestCharge(stripe: Stripe, subscriptionId: string, te
       return null;
     }
     await stripe.subscriptions.update(subscriptionId, {
-      trial_end: nextUnix,
+      billing_cycle_anchor: nextUnix,
       proration_behavior: "none",
     });
     console.log(`[auto-pay-test] next charge in ${testMinutes}m at ${new Date(nextUnix * 1000).toISOString()}`);
@@ -44,6 +44,133 @@ async function scheduleNextTestCharge(stripe: Stripe, subscriptionId: string, te
     console.error("[auto-pay-test] scheduleNextTestCharge failed:", err);
     throw err;
   }
+}
+
+async function activateTestAutoPay(
+  supabase: ReturnType<typeof createClient>,
+  stripe: Stripe,
+  session: Stripe.Checkout.Session,
+) {
+  const userId = session.metadata?.user_id;
+  if (!userId) throw new Error("Missing user_id in session metadata.");
+
+  const testMinutes = Number(session.metadata?.test_minutes || DEFAULT_TEST_MINUTES) || DEFAULT_TEST_MINUTES;
+  const amount = Number(session.metadata?.amount || (session.amount_total || 0) / 100);
+  const description = session.metadata?.description || "Membership Auto-Pay";
+  const planKey = session.metadata?.plan_key || "";
+  const chargeDay = Math.min(new Date().getUTCDate(), 28);
+
+  const paymentResult = await insertDashboardPayment(supabase, {
+    userId,
+    amount: (session.amount_total || 0) / 100,
+    referenceNumber: session.id,
+    paidAt: new Date().toISOString(),
+    description: "Monthly Membership — First month",
+    label: "Stripe",
+  });
+
+  const fullSession = await stripe.checkout.sessions.retrieve(session.id, {
+    expand: ["payment_intent", "customer"],
+  });
+
+  const customerId =
+    typeof fullSession.customer === "string"
+      ? fullSession.customer
+      : fullSession.customer?.id;
+
+  if (!customerId) throw new Error("Missing Stripe customer on checkout session.");
+
+  const pi = fullSession.payment_intent;
+  if (pi && typeof pi !== "string") {
+    const paymentMethodId =
+      typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method?.id;
+    if (paymentMethodId) {
+      await stripe.customers.update(customerId, {
+        invoice_settings: { default_payment_method: paymentMethodId },
+      });
+    }
+  }
+
+  const { data: oldRows } = await supabase
+    .from("recurring_contributions")
+    .select("stripe_subscription_id")
+    .eq("user_id", userId)
+    .eq("status", "active");
+
+  for (const row of oldRows || []) {
+    if (!row.stripe_subscription_id) continue;
+    try {
+      await stripe.subscriptions.cancel(row.stripe_subscription_id);
+    } catch {
+      // Subscription may already be cancelled.
+    }
+  }
+
+  await supabase
+    .from("recurring_contributions")
+    .update({ status: "cancelled" })
+    .eq("user_id", userId)
+    .eq("status", "active");
+
+  const anchorUnix = Math.floor(Date.now() / 1000) + testMinutes * 60;
+  const subscription = await stripe.subscriptions.create({
+    customer: customerId,
+    items: [{
+      price_data: {
+        currency: "inr",
+        unit_amount: Math.round(amount * 100),
+        product_data: {
+          name: description,
+          description: `TEST: auto-charge every ${testMinutes} minutes`,
+        },
+        recurring: { interval: "month" },
+      },
+    }],
+    billing_cycle_anchor: anchorUnix,
+    proration_behavior: "none",
+    metadata: {
+      user_id: userId,
+      test_mode: "true",
+      test_minutes: String(testMinutes),
+      plan_key: planKey,
+      charge_day: String(chargeDay),
+      contribution_type: "monthly",
+    },
+  });
+
+  const nextChargeIso = new Date(anchorUnix * 1000).toISOString();
+
+  await supabase.from("recurring_contributions").insert({
+    user_id: userId,
+    description: `Membership Auto-Pay (TEST every ${testMinutes} min)`,
+    amount,
+    frequency: "monthly",
+    next_charge_date: nextChargeIso.slice(0, 10),
+    status: "active",
+    stripe_subscription_id: subscription.id,
+    charge_day_of_month: chargeDay,
+  });
+
+  await supabase
+    .from("memberships")
+    .update({ stripe_subscription_id: subscription.id, billing_status: "active", status: "active" })
+    .eq("user_id", userId);
+
+  await supabase.from("notifications").insert({
+    user_id: userId,
+    title: "Auto-Pay Enabled",
+    body: `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. TEST mode: next charge in ${testMinutes} minutes.`,
+    type: "payment",
+  });
+
+  return {
+    amount: paymentResult.amount || amount,
+    nextCharge: nextChargeIso,
+    subscriptionId: subscription.id,
+    paymentRecorded: paymentResult.recorded,
+    testMode: true,
+    autoPay: true,
+  };
 }
 
 function resolveReturnBaseUrl(requested: unknown, fallback: string) {
@@ -272,7 +399,7 @@ async function activateAutoPay(
       sessionFallback,
     );
     const nextChargeIso = testMinutes > 0
-      ? await scheduleNextTestCharge(stripe, subscriptionId, testMinutes)
+      ? new Date((sub.billing_cycle_anchor || sub.current_period_end) * 1000).toISOString()
       : new Date(sub.current_period_end * 1000).toISOString();
     if (nextChargeIso) {
       await supabase
@@ -321,11 +448,8 @@ async function activateAutoPay(
     sessionFallback,
   );
 
-  // Test checkout sets trial_end at creation — only schedule here if not already trialing.
   const nextChargeIso = testMinutes > 0
-    ? (sub.status === "trialing" && sub.trial_end
-      ? new Date(sub.trial_end * 1000).toISOString()
-      : await scheduleNextTestCharge(stripe, subscriptionId, testMinutes))
+    ? new Date((sub.billing_cycle_anchor || sub.current_period_end) * 1000).toISOString()
     : new Date(sub.current_period_end * 1000).toISOString();
   const nextChargeDate = (nextChargeIso || new Date().toISOString()).slice(0, 10);
 
@@ -395,6 +519,19 @@ async function recordCompletedSession(
 
   if (!userId) {
     throw new Error("Missing user_id in Stripe session.");
+  }
+
+  if (session.mode === "payment" && session.metadata?.auto_pay === "true" && session.metadata?.test_mode === "true") {
+    if (!stripe) throw new Error("Stripe client required for test auto-pay setup.");
+    const result = await activateTestAutoPay(supabase, stripe, session);
+    return {
+      alreadyRecorded: false,
+      amount: result.amount,
+      autoPay: true,
+      nextChargeDate: result.nextCharge,
+      paymentRecorded: result.paymentRecorded,
+      testMode: true,
+    };
   }
 
   if (session.mode === "subscription") {
@@ -669,64 +806,68 @@ Deno.serve(async (req) => {
       test_minutes: String(testMinutes || 0),
     };
 
-    // TEST: one-time first month now + subscription trial → recurring invoice every N minutes.
-    // PROD: single recurring line item, first charge at checkout, renew monthly on same date.
-    const lineItems = testMinutes > 0
-      ? [
-          {
-            price_data: {
-              currency: "inr",
-              unit_amount: Math.round(amount * 100),
-              product_data: { name: `${description} — First month` },
-            },
-            quantity: 1,
-          },
-          {
-            price_data: {
-              currency: "inr",
-              unit_amount: Math.round(amount * 100),
-              product_data: {
-                name: description,
-                description: `TEST: auto-charge every ${testMinutes} minutes`,
-              },
-              recurring: { interval: "month" },
-            },
-            quantity: 1,
-          },
-        ]
-      : [
-          {
-            price_data: {
-              currency: "inr",
-              unit_amount: Math.round(amount * 100),
-              product_data: {
-                name: description,
-                description: `Pay now, then ₹${amount}/month on this date each month`,
-              },
-              recurring: { interval: "month" },
-            },
-            quantity: 1,
-          },
-        ];
-
-    const subscriptionData: Record<string, unknown> = { metadata: subscriptionMetadata };
+    // TEST: one-time payment now, then create subscription with next charge in N minutes.
+    // PROD: subscription checkout, first charge now, renew monthly on same date.
     if (testMinutes > 0) {
-      subscriptionData.trial_end = Math.floor(Date.now() / 1000) + testMinutes * 60;
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        customer: customerId,
+        payment_method_types: ["card"],
+        line_items: [{
+          price_data: {
+            currency: "inr",
+            unit_amount: Math.round(amount * 100),
+            product_data: { name: `${description} — First month` },
+          },
+          quantity: 1,
+        }],
+        payment_intent_data: {
+          setup_future_usage: "off_session",
+        },
+        metadata: {
+          user_id: user.id,
+          notes,
+          auto_pay: "true",
+          test_mode: "true",
+          test_minutes: String(testMinutes),
+          contribution_type: "monthly",
+          plan_key: planKey,
+          amount: String(amount),
+          description,
+        },
+        success_url: `${siteUrl}/payments?subscription=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${siteUrl}/payments?canceled=true`,
+      });
+
+      return new Response(JSON.stringify({ url: session.url, sessionId: session.id }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
       payment_method_types: ["card"],
-      line_items: lineItems,
-      subscription_data: subscriptionData,
+      line_items: [{
+        price_data: {
+          currency: "inr",
+          unit_amount: Math.round(amount * 100),
+          product_data: {
+            name: description,
+            description: `Pay now, then ₹${amount}/month on this date each month`,
+          },
+          recurring: { interval: "month" },
+        },
+        quantity: 1,
+      }],
+      subscription_data: { metadata: subscriptionMetadata },
       metadata: {
         user_id: user.id,
         notes,
         auto_pay: "true",
         contribution_type: "monthly",
         plan_key: planKey,
-        test_mode: testMinutes > 0 ? "true" : "false",
+        test_mode: "false",
       },
       success_url: `${siteUrl}/payments?subscription=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${siteUrl}/payments?canceled=true`,
