@@ -16,24 +16,18 @@ function getTestMinutes(subscription?: Stripe.Subscription | null) {
   return 0;
 }
 
-async function scheduleNextTestCharge(stripe: Stripe, subscriptionId: string, testMinutes: number) {
+async function setNextTestChargeAt(
+  stripe: Stripe,
+  subscriptionId: string,
+  testMinutes: number,
+) {
   if (!testMinutes || testMinutes <= 0) return null;
   const nextUnix = Math.floor(Date.now() / 1000) + Math.max(testMinutes, 1) * 60;
-  try {
-    const sub = await stripe.subscriptions.retrieve(subscriptionId);
-    if (sub.status === "canceled" || sub.status === "incomplete_expired") {
-      return null;
-    }
-    await stripe.subscriptions.update(subscriptionId, {
-      billing_cycle_anchor: nextUnix,
-      proration_behavior: "none",
-    });
-    console.log(`[auto-pay-test] next charge in ${testMinutes}m at ${new Date(nextUnix * 1000).toISOString()}`);
-    return new Date(nextUnix * 1000).toISOString();
-  } catch (err) {
-    console.error("[auto-pay-test] scheduleNextTestCharge failed:", err);
-    throw err;
-  }
+  await stripe.subscriptions.update(subscriptionId, {
+    metadata: { next_charge_at: String(nextUnix) },
+  });
+  console.log(`[auto-pay-test] next charge in ${testMinutes}m at ${new Date(nextUnix * 1000).toISOString()}`);
+  return new Date(nextUnix * 1000).toISOString();
 }
 
 async function activateTestAutoPay(
@@ -102,7 +96,8 @@ async function activateTestAutoPay(
     }
   }
 
-  const anchorUnix = Math.floor(Date.now() / 1000) + testMinutes * 60;
+  const nextChargeUnix = Math.floor(Date.now() / 1000) + testMinutes * 60;
+  const farFutureAnchor = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
   const product = await stripe.products.create({
     name: description,
     description: `TEST: auto-charge every ${testMinutes} minutes`,
@@ -117,19 +112,20 @@ async function activateTestAutoPay(
         recurring: { interval: "month" },
       },
     }],
-    billing_cycle_anchor: anchorUnix,
+    billing_cycle_anchor: farFutureAnchor,
     proration_behavior: "none",
     metadata: {
       user_id: userId,
       test_mode: "true",
       test_minutes: String(testMinutes),
+      next_charge_at: String(nextChargeUnix),
       plan_key: planKey,
       charge_day: String(chargeDay),
       contribution_type: "monthly",
     },
   });
 
-  const nextChargeIso = new Date(anchorUnix * 1000).toISOString();
+  const nextChargeIso = new Date(nextChargeUnix * 1000).toISOString();
 
   await supabase.from("recurring_contributions").insert({
     user_id: userId,
@@ -338,8 +334,8 @@ async function activateAutoPay(
 
   if (existingRow?.status === "active") {
     await recordSubscriptionCharge(supabase, stripe, userId, subscriptionId, sessionFallback);
-    const nextChargeIso = testMinutes > 0
-      ? new Date((sub.billing_cycle_anchor || sub.current_period_end) * 1000).toISOString()
+    const nextChargeIso = testMinutes > 0 && sub.metadata?.next_charge_at
+      ? new Date(Number(sub.metadata.next_charge_at) * 1000).toISOString()
       : new Date(sub.current_period_end * 1000).toISOString();
     if (nextChargeIso) {
       await supabase
@@ -377,8 +373,8 @@ async function activateAutoPay(
 
   await recordSubscriptionCharge(supabase, stripe, userId, subscriptionId, sessionFallback);
 
-  const nextChargeIso = testMinutes > 0
-    ? new Date((sub.billing_cycle_anchor || sub.current_period_end) * 1000).toISOString()
+  const nextChargeIso = testMinutes > 0 && sub.metadata?.next_charge_at
+    ? new Date(Number(sub.metadata.next_charge_at) * 1000).toISOString()
     : new Date(sub.current_period_end * 1000).toISOString();
   const nextChargeDate = (nextChargeIso || new Date().toISOString()).slice(0, 10);
 
@@ -592,7 +588,7 @@ async function recordInvoicePaid(
   if (existing) {
     if (testMinutes > 0) {
       try {
-        await scheduleNextTestCharge(stripe, subscriptionId, testMinutes);
+        await setNextTestChargeAt(stripe, subscriptionId, testMinutes);
       } catch (err) {
         console.error("[stripe-webhook] reschedule after duplicate failed:", err);
       }
@@ -618,10 +614,10 @@ async function recordInvoicePaid(
   let nextCharge = new Date(sub.current_period_end * 1000).toISOString().slice(0, 10);
   if (testMinutes > 0) {
     try {
-      const nextChargeIso = await scheduleNextTestCharge(stripe, subscriptionId, testMinutes);
+      const nextChargeIso = await setNextTestChargeAt(stripe, subscriptionId, testMinutes);
       if (nextChargeIso) nextCharge = nextChargeIso.slice(0, 10);
     } catch (err) {
-      console.error("[stripe-webhook] scheduleNextTestCharge failed:", err);
+      console.error("[stripe-webhook] setNextTestChargeAt failed:", err);
     }
   }
 
@@ -693,8 +689,8 @@ async function handleSubscriptionUpdated(
   const amount = (subscription.items.data[0]?.price?.unit_amount || 0) / 100;
 
   let nextCharge: string;
-  if (testMinutes > 0 && subscription.billing_cycle_anchor) {
-    nextCharge = new Date(subscription.billing_cycle_anchor * 1000).toISOString().slice(0, 10);
+  if (testMinutes > 0 && subscription.metadata?.next_charge_at) {
+    nextCharge = new Date(Number(subscription.metadata.next_charge_at) * 1000).toISOString().slice(0, 10);
   } else if (subscription.current_period_end) {
     nextCharge = new Date(subscription.current_period_end * 1000).toISOString().slice(0, 10);
   } else {

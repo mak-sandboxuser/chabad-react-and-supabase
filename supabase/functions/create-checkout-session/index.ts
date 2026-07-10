@@ -25,25 +25,21 @@ function getTestMinutes(subscription?: Stripe.Subscription | null) {
   return 0;
 }
 
-/** Schedule next TEST auto-pay charge using billing_cycle_anchor (trial_end requires 2+ days). */
-async function scheduleNextTestCharge(stripe: Stripe, subscriptionId: string, testMinutes: number) {
+/** Store next TEST charge time on subscription metadata (cron job creates the invoice). */
+async function setNextTestChargeAt(
+  stripe: Stripe,
+  subscriptionId: string,
+  testMinutes: number,
+) {
   if (!testMinutes || testMinutes <= 0) return null;
   const nextUnix = Math.floor(Date.now() / 1000) + Math.max(testMinutes, 1) * 60;
-  try {
-    const sub = await stripe.subscriptions.retrieve(subscriptionId);
-    if (sub.status === "canceled" || sub.status === "incomplete_expired") {
-      return null;
-    }
-    await stripe.subscriptions.update(subscriptionId, {
-      billing_cycle_anchor: nextUnix,
-      proration_behavior: "none",
-    });
-    console.log(`[auto-pay-test] next charge in ${testMinutes}m at ${new Date(nextUnix * 1000).toISOString()}`);
-    return new Date(nextUnix * 1000).toISOString();
-  } catch (err) {
-    console.error("[auto-pay-test] scheduleNextTestCharge failed:", err);
-    throw err;
-  }
+  await stripe.subscriptions.update(subscriptionId, {
+    metadata: {
+      next_charge_at: String(nextUnix),
+    },
+  });
+  console.log(`[auto-pay-test] next charge in ${testMinutes}m at ${new Date(nextUnix * 1000).toISOString()}`);
+  return new Date(nextUnix * 1000).toISOString();
 }
 
 async function activateTestAutoPay(
@@ -112,7 +108,8 @@ async function activateTestAutoPay(
     .eq("user_id", userId)
     .eq("status", "active");
 
-  const anchorUnix = Math.floor(Date.now() / 1000) + testMinutes * 60;
+  const nextChargeUnix = Math.floor(Date.now() / 1000) + testMinutes * 60;
+  const farFutureAnchor = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
   const product = await stripe.products.create({
     name: description,
     description: `TEST: auto-charge every ${testMinutes} minutes`,
@@ -127,19 +124,20 @@ async function activateTestAutoPay(
         recurring: { interval: "month" },
       },
     }],
-    billing_cycle_anchor: anchorUnix,
+    billing_cycle_anchor: farFutureAnchor,
     proration_behavior: "none",
     metadata: {
       user_id: userId,
       test_mode: "true",
       test_minutes: String(testMinutes),
+      next_charge_at: String(nextChargeUnix),
       plan_key: planKey,
       charge_day: String(chargeDay),
       contribution_type: "monthly",
     },
   });
 
-  const nextChargeIso = new Date(anchorUnix * 1000).toISOString();
+  const nextChargeIso = new Date(nextChargeUnix * 1000).toISOString();
 
   await supabase.from("recurring_contributions").insert({
     user_id: userId,
