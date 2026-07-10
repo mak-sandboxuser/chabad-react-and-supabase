@@ -12,6 +12,8 @@ export default function ContributionSummary({ summary }) {
   const outstanding = Number(summary?.outstanding || 0);
   const nextAmount = Number(summary?.nextAmount || 0);
   const autoPayEnabled = Boolean(summary?.autoPayEnabled);
+  const autoPayTestMode = Boolean(summary?.autoPayTestMode);
+  const autoPayTestMinutes = summary?.autoPayTestMinutes || 10;
   const nextDueDate = summary?.nextDueDate
     ? new Date(summary.nextDueDate).toLocaleString("en-IN", {
         month: "short",
@@ -64,7 +66,11 @@ export default function ContributionSummary({ summary }) {
           <p className="text-[22px] font-bold text-[#1a2a5e] leading-none">{currencyFormatter.format(nextAmount)}</p>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <p className="text-[11px] text-gray-400">
-              {autoPayEnabled ? `Auto-pay · ${nextDueDate}` : nextDueDate}
+              {autoPayEnabled && autoPayTestMode
+                ? `Auto-pay TEST · every ${autoPayTestMinutes} minutes`
+                : autoPayEnabled
+                  ? `Auto-pay · ${nextDueDate}`
+                  : nextDueDate}
             </p>
             {autoPayEnabled && (
               <span className="bg-[#ede9fe] text-[#7c3aed] text-[10px] font-semibold px-2 py-0.5 rounded-full">

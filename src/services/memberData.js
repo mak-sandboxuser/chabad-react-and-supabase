@@ -304,6 +304,12 @@ export function buildDashboardData({ profile, user, membership, payments, contri
     ? Number(activeAutoPay.amount)
     : Number(nextContribution?.amount || getMonthlyAmount(membership));
   const nextDueDate = activeAutoPay?.next_charge_date || nextContribution?.due_date || null;
+  const autoPayTestMode = Boolean(
+    activeAutoPay?.description?.includes("TEST") || activeAutoPay?.description?.includes("test"),
+  );
+  const autoPayTestMinutes = autoPayTestMode
+    ? Number(activeAutoPay?.description?.match(/every (\d+) min/i)?.[1] || 10)
+    : null;
 
   return {
     userName: displayName,
@@ -338,6 +344,8 @@ export function buildDashboardData({ profile, user, membership, payments, contri
       nextDueDate,
       autoPayEnabled: Boolean(activeAutoPay),
       autoPayDay: activeAutoPay?.charge_day_of_month || 5,
+      autoPayTestMode,
+      autoPayTestMinutes,
     },
     recentPayments: payments.map((item) => ({
       date: formatShortDate(item.paid_at || item.created_at),

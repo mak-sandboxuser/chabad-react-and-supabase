@@ -15,12 +15,18 @@ function getTestMinutes(subscription?: Stripe.Subscription | null) {
 
 async function scheduleNextTestCharge(stripe: Stripe, subscriptionId: string, testMinutes: number) {
   if (!testMinutes || testMinutes <= 0) return null;
-  const nextUnix = Math.floor(Date.now() / 1000) + testMinutes * 60;
-  await stripe.subscriptions.update(subscriptionId, {
-    trial_end: nextUnix,
-    proration_behavior: "none",
-  });
-  return new Date(nextUnix * 1000).toISOString();
+  const nextUnix = Math.floor(Date.now() / 1000) + Math.max(testMinutes, 1) * 60;
+  try {
+    await stripe.subscriptions.update(subscriptionId, {
+      trial_end: nextUnix,
+      proration_behavior: "none",
+    });
+    console.log(`[auto-pay-test] next charge scheduled at ${new Date(nextUnix * 1000).toISOString()}`);
+    return new Date(nextUnix * 1000).toISOString();
+  } catch (err) {
+    console.error("[auto-pay-test] scheduleNextTestCharge failed:", err);
+    throw err;
+  }
 }
 
 async function insertDashboardPayment(
@@ -200,7 +206,9 @@ async function activateAutoPay(
   if (existingRow?.status === "active") {
     await recordSubscriptionCharge(supabase, stripe, userId, subscriptionId, sessionFallback);
     const nextChargeIso = testMinutes > 0
-      ? await scheduleNextTestCharge(stripe, subscriptionId, testMinutes)
+      ? (sub.status === "trialing" && sub.trial_end
+        ? new Date(sub.trial_end * 1000).toISOString()
+        : await scheduleNextTestCharge(stripe, subscriptionId, testMinutes))
       : new Date(sub.current_period_end * 1000).toISOString();
     if (nextChargeIso) {
       await supabase
@@ -239,7 +247,9 @@ async function activateAutoPay(
   await recordSubscriptionCharge(supabase, stripe, userId, subscriptionId, sessionFallback);
 
   const nextChargeIso = testMinutes > 0
-    ? await scheduleNextTestCharge(stripe, subscriptionId, testMinutes)
+    ? (sub.status === "trialing" && sub.trial_end
+      ? new Date(sub.trial_end * 1000).toISOString()
+      : await scheduleNextTestCharge(stripe, subscriptionId, testMinutes))
     : new Date(sub.current_period_end * 1000).toISOString();
   const nextChargeDate = (nextChargeIso || new Date().toISOString()).slice(0, 10);
 
@@ -424,6 +434,15 @@ async function recordInvoicePaid(
     return new Response("Missing user_id on subscription.", { status: 400 });
   }
 
+  const testMinutes = getTestMinutes(sub);
+
+  // First month in test mode is a one-time checkout line — skip $0 subscription_create invoices.
+  if (testMinutes > 0 && invoice.billing_reason === "subscription_create") {
+    return new Response(JSON.stringify({ received: true, skipped: "test_subscription_create" }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const referenceNumber = invoice.id;
   const { data: existing } = await supabase
     .from("payments")
@@ -432,7 +451,7 @@ async function recordInvoicePaid(
     .maybeSingle();
 
   if (existing) {
-    return new Response(JSON.stringify({ received: true }), {
+    return new Response(JSON.stringify({ received: true, alreadyRecorded: true }), {
       headers: { "Content-Type": "application/json" },
     });
   }
@@ -447,9 +466,9 @@ async function recordInvoicePaid(
     amount,
     referenceNumber,
     paidAt,
+    description: testMinutes > 0 ? "Membership Auto-Pay (TEST)" : "Monthly Membership Auto-Pay",
   });
 
-  const testMinutes = getTestMinutes(sub);
   const nextChargeIso = testMinutes > 0
     ? await scheduleNextTestCharge(stripe, subscriptionId, testMinutes)
     : new Date(sub.current_period_end * 1000).toISOString();
@@ -457,7 +476,14 @@ async function recordInvoicePaid(
 
   await supabase
     .from("recurring_contributions")
-    .update({ next_charge_date: nextCharge, amount, status: "active" })
+    .update({
+      next_charge_date: nextCharge,
+      amount,
+      status: "active",
+      description: testMinutes > 0
+        ? `Membership Auto-Pay (TEST every ${testMinutes} min)`
+        : "Membership Auto-Pay (same date each month)",
+    })
     .eq("stripe_subscription_id", subscriptionId);
 
   await supabase.from("notifications").insert({
@@ -556,19 +582,22 @@ async function handleSubscriptionUpdated(
   supabase: ReturnType<typeof createClient>,
   subscription: Stripe.Subscription,
 ) {
-  const nextCharge = new Date(
-    subscription.current_period_end * 1000
-  ).toISOString().slice(0, 10);
+  const testMinutes = getTestMinutes(subscription);
+  const amount = (subscription.items.data[0]?.price?.unit_amount || 0) / 100;
 
-  const amount =
-    (subscription.items.data[0]?.price?.unit_amount || 0) / 100;
+  let nextCharge: string;
+  if (testMinutes > 0 && subscription.trial_end && subscription.status === "trialing") {
+    nextCharge = new Date(subscription.trial_end * 1000).toISOString().slice(0, 10);
+  } else {
+    nextCharge = new Date(subscription.current_period_end * 1000).toISOString().slice(0, 10);
+  }
 
   await supabase
     .from("recurring_contributions")
     .update({
       amount,
       next_charge_date: nextCharge,
-      status: subscription.status === "active" ? "active" : "cancelled",
+      status: ["active", "trialing"].includes(subscription.status) ? "active" : "cancelled",
     })
     .eq("stripe_subscription_id", subscription.id);
 
