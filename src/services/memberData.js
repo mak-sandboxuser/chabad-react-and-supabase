@@ -82,7 +82,8 @@ export async function fetchPayments(userId, limit) {
     .from("payments")
     .select("*")
     .eq("user_id", userId)
-    .order("paid_at", { ascending: false });
+    .order("paid_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false });
   if (limit) query = query.limit(limit);
   const { data, error } = await query;
   if (error) throw error;
@@ -339,10 +340,10 @@ export function buildDashboardData({ profile, user, membership, payments, contri
       autoPayDay: activeAutoPay?.charge_day_of_month || 5,
     },
     recentPayments: payments.slice(0, 5).map((item) => ({
-      date: formatShortDate(item.paid_at),
+      date: formatShortDate(item.paid_at || item.created_at),
       description: item.description || "Contribution",
       amount: formatCurrency(item.amount),
-      status: item.status || "paid",
+      status: item.status === "paid" ? "Paid" : (item.status || "Paid"),
     })),
     householdMembers: householdMembers.slice(0, 4).map((member) => ({
       initials: getInitials(member.full_name),

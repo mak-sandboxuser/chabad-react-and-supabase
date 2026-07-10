@@ -1,16 +1,11 @@
-const defaultPayments = [
-  { date: "Apr 15, 2025", description: "Monthly Contribution", amount: "$300.00", status: "Paid" },
-  { date: "Mar 15, 2025", description: "Monthly Contribution", amount: "$300.00", status: "Paid" },
-  { date: "Feb 15, 2025", description: "Monthly Contribution", amount: "$300.00", status: "Paid" },
-  { date: "Jan 15, 2025", description: "Annual Membership", amount: "$3,600.00", status: "Paid" },
-];
+import { Link } from "react-router-dom";
 
-export default function RecentPayments({ payments = defaultPayments }) {
+export default function RecentPayments({ payments = [] }) {
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-[14px] font-semibold text-gray-800">Recent Payments</h3>
-        <a href="#" className="text-[12px] text-[#1a6bdc] font-medium hover:underline">View all</a>
+        <Link to="/contributions" className="text-[12px] text-[#1a6bdc] font-medium hover:underline">View all</Link>
       </div>
 
       <table className="w-full">
@@ -45,7 +40,7 @@ export default function RecentPayments({ payments = defaultPayments }) {
       </table>
 
       <div className="mt-3 pt-3 border-t border-gray-50 text-center">
-        <a href="#" className="text-[12px] text-[#1a6bdc] font-medium hover:underline">View all payments</a>
+        <Link to="/contributions" className="text-[12px] text-[#1a6bdc] font-medium hover:underline">View all payments</Link>
       </div>
     </div>
   );

@@ -72,7 +72,7 @@ export default function ContributionSummary({ summary }) {
             )}
           </div>
           <Link
-            to="/billing"
+            to="/recurring"
             className="mt-3 w-full inline-flex justify-center border border-gray-200 hover:border-gray-300 text-[#1a2a5e] text-[12px] font-semibold py-2.5 rounded-xl transition-colors"
           >
             Manage Billing

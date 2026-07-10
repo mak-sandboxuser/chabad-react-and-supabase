@@ -3,26 +3,28 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const AUTO_PAY_DAY = 5;
 
-async function recordSubscriptionCharge(
+async function insertDashboardPayment(
   supabase: ReturnType<typeof createClient>,
-  stripe: Stripe,
-  userId: string,
-  subscriptionId: string,
+  {
+    userId,
+    amount,
+    referenceNumber,
+    paidAt,
+    description = "Monthly Membership Auto-Pay",
+    label = "Stripe Auto-Pay",
+  }: {
+    userId: string;
+    amount: number;
+    referenceNumber: string;
+    paidAt: string;
+    description?: string;
+    label?: string;
+  },
 ) {
-  const sub = await stripe.subscriptions.retrieve(subscriptionId, {
-    expand: ["latest_invoice"],
-  });
-
-  const latestInvoice = sub.latest_invoice;
-  if (!latestInvoice || typeof latestInvoice === "string") {
+  if (!amount || amount <= 0 || !referenceNumber) {
     return { recorded: false, amount: 0 };
   }
 
-  if (latestInvoice.status !== "paid" || !latestInvoice.amount_paid) {
-    return { recorded: false, amount: 0 };
-  }
-
-  const referenceNumber = latestInvoice.id;
   const { data: existing } = await supabase
     .from("payments")
     .select("id")
@@ -30,13 +32,8 @@ async function recordSubscriptionCharge(
     .maybeSingle();
 
   if (existing) {
-    return { recorded: true, amount: latestInvoice.amount_paid / 100 };
+    return { recorded: true, amount };
   }
-
-  const amount = latestInvoice.amount_paid / 100;
-  const paidAt = latestInvoice.status_transitions?.paid_at
-    ? new Date(latestInvoice.status_transitions.paid_at * 1000).toISOString()
-    : new Date().toISOString();
 
   const { data: pendingBill } = await supabase
     .from("membership_billing_records")
@@ -48,26 +45,43 @@ async function recordSubscriptionCharge(
     .maybeSingle();
 
   if (pendingBill?.id) {
-    await supabase.rpc("complete_membership_payment", {
+    const { error } = await supabase.rpc("complete_membership_payment", {
       p_billing_record_id: pendingBill.id,
       p_payment_method: "card",
-      p_payment_method_label: "Stripe Auto-Pay",
+      p_payment_method_label: label,
       p_reference_number: referenceNumber,
       p_paid_at: paidAt,
       p_paid_amount: amount,
     });
-  } else {
-    await supabase.from("payments").insert({
-      user_id: userId,
-      amount,
-      description: "Monthly Membership Auto-Pay",
-      status: "paid",
-      payment_method: "card",
-      payment_method_label: "Stripe Auto-Pay",
-      reference_number: referenceNumber,
-      contribution_type: "monthly",
-      paid_at: paidAt,
-    });
+
+    if (!error) {
+      await supabase.from("notifications").insert({
+        user_id: userId,
+        title: "Payment Successful",
+        body: `Your payment of ₹${amount.toLocaleString("en-IN")} was processed successfully via Stripe Auto-Pay.`,
+        type: "payment",
+      });
+      return { recorded: true, amount };
+    }
+  }
+
+  const { error: paymentError } = await supabase.from("payments").insert({
+    user_id: userId,
+    amount,
+    description,
+    status: "paid",
+    payment_method: "card",
+    payment_method_label: label,
+    reference_number: referenceNumber,
+    contribution_type: "monthly",
+    paid_at: paidAt,
+  });
+
+  if (paymentError) {
+    if (paymentError.code === "23505") {
+      return { recorded: true, amount };
+    }
+    throw paymentError;
   }
 
   await supabase.from("notifications").insert({
@@ -78,6 +92,58 @@ async function recordSubscriptionCharge(
   });
 
   return { recorded: true, amount };
+}
+
+async function recordSubscriptionCharge(
+  supabase: ReturnType<typeof createClient>,
+  stripe: Stripe,
+  userId: string,
+  subscriptionId: string,
+  fallback?: { amount?: number; referenceNumber?: string },
+) {
+  const sub = await stripe.subscriptions.retrieve(subscriptionId, {
+    expand: ["latest_invoice"],
+  });
+
+  let latestInvoice = sub.latest_invoice;
+  if (typeof latestInvoice === "string") {
+    latestInvoice = await stripe.invoices.retrieve(latestInvoice);
+  }
+
+  const invoicePaid =
+    latestInvoice &&
+    typeof latestInvoice !== "string" &&
+    latestInvoice.status === "paid" &&
+    Number(latestInvoice.amount_paid || 0) > 0;
+
+  if (invoicePaid && typeof latestInvoice !== "string") {
+    const amount = latestInvoice.amount_paid / 100;
+    const paidAt = latestInvoice.status_transitions?.paid_at
+      ? new Date(latestInvoice.status_transitions.paid_at * 1000).toISOString()
+      : new Date().toISOString();
+
+    return insertDashboardPayment(supabase, {
+      userId,
+      amount,
+      referenceNumber: latestInvoice.id,
+      paidAt,
+    });
+  }
+
+  const fallbackAmount = Number(fallback?.amount || 0);
+  const fallbackRef = fallback?.referenceNumber;
+  if (fallbackAmount > 0 && fallbackRef) {
+    return insertDashboardPayment(supabase, {
+      userId,
+      amount: fallbackAmount,
+      referenceNumber: fallbackRef,
+      paidAt: new Date().toISOString(),
+      description: "Monthly Membership Contribution",
+      label: "Stripe",
+    });
+  }
+
+  return { recorded: false, amount: 0 };
 }
 
 async function activateAutoPay(
@@ -105,8 +171,13 @@ async function activateAutoPay(
     .eq("stripe_subscription_id", subscriptionId)
     .maybeSingle();
 
+  const sessionFallback = {
+    amount: (session.amount_total || 0) / 100 || amount,
+    referenceNumber: session.id,
+  };
+
   if (existingRow?.status === "active") {
-    await recordSubscriptionCharge(supabase, stripe, userId, subscriptionId);
+    await recordSubscriptionCharge(supabase, stripe, userId, subscriptionId, sessionFallback);
     return new Response(JSON.stringify({ received: true, alreadyActive: true }), {
       headers: { "Content-Type": "application/json" },
     });
@@ -182,7 +253,7 @@ async function activateAutoPay(
     }
   }
 
-  await recordSubscriptionCharge(supabase, stripe, userId, subscriptionId);
+  await recordSubscriptionCharge(supabase, stripe, userId, subscriptionId, sessionFallback);
 
   return new Response(JSON.stringify({ received: true }), {
     headers: { "Content-Type": "application/json" },
@@ -219,7 +290,7 @@ async function recordCompletedSession(
       contributionType === "monthly" ? "Monthly Contribution" : "Membership Contribution";
 
     if (billingRecordId) {
-      await supabase.rpc("complete_membership_payment", {
+      const { error } = await supabase.rpc("complete_membership_payment", {
         p_billing_record_id: Number(billingRecordId),
         p_payment_method: "card",
         p_payment_method_label: "Stripe",
@@ -227,6 +298,19 @@ async function recordCompletedSession(
         p_paid_at: new Date().toISOString(),
         p_paid_amount: amount,
       });
+      if (error) {
+        await supabase.from("payments").insert({
+          user_id: userId,
+          amount,
+          description: session.metadata?.notes?.trim() || description,
+          status: "paid",
+          payment_method: "card",
+          payment_method_label: "Stripe",
+          reference_number: referenceNumber,
+          contribution_type: contributionType,
+          paid_at: new Date().toISOString(),
+        });
+      }
     } else {
       await supabase.from("payments").insert({
         user_id: userId,
@@ -316,50 +400,18 @@ async function recordInvoicePaid(
     ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
     : new Date().toISOString();
 
-  const { data: pendingBill } = await supabase
-    .from("membership_billing_records")
-    .select("id")
-    .eq("user_id", userId)
-    .in("status", ["pending", "overdue"])
-    .order("billing_period", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (pendingBill?.id) {
-    await supabase.rpc("complete_membership_payment", {
-      p_billing_record_id: pendingBill.id,
-      p_payment_method: "card",
-      p_payment_method_label: "Stripe Auto-Pay",
-      p_reference_number: referenceNumber,
-      p_paid_at: paidAt,
-      p_paid_amount: amount,
-    });
-  } else {
-    await supabase.from("payments").insert({
-      user_id: userId,
-      amount,
-      description: "Monthly Membership Auto-Pay",
-      status: "paid",
-      payment_method: "card",
-      payment_method_label: "Stripe Auto-Pay",
-      reference_number: referenceNumber,
-      contribution_type: "monthly",
-      paid_at: paidAt,
-    });
-  }
+  await insertDashboardPayment(supabase, {
+    userId,
+    amount,
+    referenceNumber,
+    paidAt,
+  });
 
   const nextCharge = new Date(sub.current_period_end * 1000).toISOString().slice(0, 10);
   await supabase
     .from("recurring_contributions")
     .update({ next_charge_date: nextCharge, amount, status: "active" })
     .eq("stripe_subscription_id", subscriptionId);
-
-  await supabase.from("notifications").insert({
-    user_id: userId,
-    title: "Auto-Pay Successful",
-    body: `Your monthly contribution of ₹${amount.toLocaleString("en-IN")} was charged automatically.`,
-    type: "payment",
-  });
 
   return new Response(JSON.stringify({ received: true }), {
     headers: { "Content-Type": "application/json" },
