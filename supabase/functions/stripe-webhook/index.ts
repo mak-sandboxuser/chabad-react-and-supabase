@@ -4,8 +4,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 const DEFAULT_TEST_MINUTES = 10;
 
 function getTestMinutes(subscription?: Stripe.Subscription | null) {
-  const fromEnv = Number(Deno.env.get("AUTO_PAY_TEST_MINUTES") || 0);
-  if (fromEnv > 0) return fromEnv;
+  // Explicit env wins: "0" forces real MONTHLY billing even on test keys.
+  const raw = Deno.env.get("AUTO_PAY_TEST_MINUTES");
+  if (raw !== undefined && raw !== null && raw.trim() !== "") {
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n > 0 ? n : 0;
+  }
   if (subscription?.metadata?.test_mode === "true") {
     const fromMeta = Number(subscription.metadata.test_minutes || DEFAULT_TEST_MINUTES);
     return fromMeta > 0 ? fromMeta : DEFAULT_TEST_MINUTES;
@@ -14,6 +18,38 @@ function getTestMinutes(subscription?: Stripe.Subscription | null) {
     return DEFAULT_TEST_MINUTES;
   }
   return 0;
+}
+
+/** Successful charges allowed before auto-pay stops itself (default 12 = one year). */
+function getMaxCharges(subscription?: Stripe.Subscription | null) {
+  const fromMeta = Number(subscription?.metadata?.max_charges || 0);
+  if (fromMeta > 0) return fromMeta;
+  const fromEnv = Number(Deno.env.get("AUTO_PAY_MAX_CHARGES") || 12);
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 12;
+}
+
+/**
+ * Real monthly subscriptions: cancel after `max_charges` monthly cycles so Stripe
+ * charges exactly N times then stops. No-op for fast test-mode subscriptions.
+ */
+async function scheduleAutoStop(
+  stripe: Stripe,
+  sub: Stripe.Subscription,
+  testMinutes: number,
+) {
+  if (testMinutes > 0 || sub.cancel_at) return;
+  const maxCharges = getMaxCharges(sub);
+  const start = sub.current_period_start || Math.floor(Date.now() / 1000);
+  const cancelDate = new Date(start * 1000);
+  cancelDate.setMonth(cancelDate.getMonth() + maxCharges);
+  try {
+    await stripe.subscriptions.update(sub.id, {
+      cancel_at: Math.floor(cancelDate.getTime() / 1000),
+      metadata: { ...sub.metadata, max_charges: String(maxCharges) },
+    });
+  } catch (err) {
+    console.error("[auto-stop] failed to set cancel_at:", err);
+  }
 }
 
 async function setNextTestChargeAt(
@@ -128,6 +164,8 @@ async function activateTestAutoPay(
       amount: String(amount),
       payment_method: paymentMethod,
       currency,
+      max_charges: String(getMaxCharges()),
+      charges_count: "1",
     },
   });
 
@@ -334,6 +372,9 @@ async function activateAutoPay(
   const amount = (sub.items.data[0]?.price?.unit_amount || 0) / 100;
   const testMinutes = getTestMinutes(sub);
   const chargeDay = Math.min(new Date().getUTCDate(), 28);
+
+  // MONTHLY (non-test): auto-stop after N monthly charges via Stripe cancel_at.
+  await scheduleAutoStop(stripe, sub, testMinutes);
 
   const { data: existingRow } = await supabase
     .from("recurring_contributions")

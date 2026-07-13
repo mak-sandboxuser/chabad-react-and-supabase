@@ -93,8 +93,8 @@ export default function PaymentDetailsForm({
           <span className="block text-[14px] font-semibold text-[#1a2a5e]">Enable Auto-Pay</span>
           <span className="block text-[12px] text-gray-600 mt-1">
             {testMode
-              ? `Pay ${formatCurrency(monthly)} now. For testing, Stripe will charge again every ${testMinutes} minutes.`
-              : `Pay ${formatCurrency(monthly)} now. Stripe will charge the same amount automatically on this date each month.`}
+              ? `Pay ${formatCurrency(monthly)} now. For testing, Stripe will charge again every ${testMinutes} minutes (stops automatically after 12 charges).`
+              : `Pay ${formatCurrency(monthly)} now. Stripe charges the same amount on this date each month for 12 months, then auto-pay stops automatically.`}
           </span>
         </span>
       </label>

@@ -17,6 +17,39 @@ function getTestMinutes(subscription: Stripe.Subscription) {
   return fromMeta > 0 ? fromMeta : DEFAULT_TEST_MINUTES;
 }
 
+/** Successful charges allowed before auto-pay stops itself (default 12). */
+function getMaxCharges(subscription: Stripe.Subscription) {
+  const fromMeta = Number(subscription.metadata?.max_charges || 0);
+  if (fromMeta > 0) return fromMeta;
+  const fromEnv = Number(Deno.env.get("AUTO_PAY_MAX_CHARGES") || 12);
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 12;
+}
+
+/** Cancels the subscription and marks the recurring row cancelled once the cap is hit. */
+async function stopAutoPay(
+  stripe: Stripe,
+  supabase: ReturnType<typeof createClient>,
+  subscriptionId: string,
+  userId: string,
+  totalCharges: number,
+) {
+  try {
+    await stripe.subscriptions.cancel(subscriptionId);
+  } catch {
+    // May already be cancelled.
+  }
+  await supabase
+    .from("recurring_contributions")
+    .update({ status: "cancelled" })
+    .eq("stripe_subscription_id", subscriptionId);
+  await supabase.from("notifications").insert({
+    user_id: userId,
+    title: "Auto-Pay Completed",
+    body: `Auto-pay finished after ${totalCharges} payments and has been stopped automatically.`,
+    type: "payment",
+  });
+}
+
 function isAuthorized(req: Request) {
   const cronSecret = Deno.env.get("CRON_SECRET");
   if (cronSecret && req.headers.get("x-cron-secret") === cronSecret) {
@@ -134,6 +167,15 @@ async function chargeDueSubscription(
   }
 
   const testMinutes = getTestMinutes(sub);
+  const maxCharges = getMaxCharges(sub);
+  const chargesSoFar = Number(sub.metadata?.charges_count || 0);
+
+  // Cap reached — stop auto-pay instead of charging again.
+  if (chargesSoFar >= maxCharges) {
+    await stopAutoPay(stripe, supabase, subscriptionId, row.user_id, chargesSoFar);
+    return { subscriptionId, skipped: true, reason: "max_charges_reached", chargesSoFar };
+  }
+
   let nextChargeAt = Number(sub.metadata?.next_charge_at || 0);
 
   if (!nextChargeAt) {
@@ -215,11 +257,13 @@ async function chargeDueSubscription(
     };
   }
 
+  const newCount = chargesSoFar + 1;
   const nextUnix = now + Math.max(testMinutes, 1) * 60;
   await stripe.subscriptions.update(subscriptionId, {
     metadata: {
       ...sub.metadata,
       next_charge_at: String(nextUnix),
+      charges_count: String(newCount),
     },
   });
 
@@ -233,6 +277,19 @@ async function chargeDueSubscription(
     currency,
     pending: isBank && paymentIntent.status === "processing",
   });
+
+  // Cap reached with this charge — stop future auto-pay.
+  if (newCount >= maxCharges) {
+    await stopAutoPay(stripe, supabase, subscriptionId, row.user_id, newCount);
+    return {
+      subscriptionId,
+      charged: true,
+      completed: true,
+      paymentIntentId: paymentIntent.id,
+      amount,
+      chargesSoFar: newCount,
+    };
+  }
 
   const nextChargeDate = new Date(nextUnix * 1000).toISOString().slice(0, 10);
   await supabase
@@ -250,6 +307,7 @@ async function chargeDueSubscription(
     charged: true,
     paymentIntentId: paymentIntent.id,
     amount,
+    chargesSoFar: newCount,
     nextChargeAt: new Date(nextUnix * 1000).toISOString(),
   };
 }
