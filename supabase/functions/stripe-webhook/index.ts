@@ -46,6 +46,9 @@ async function activateTestAutoPay(
   const amount = Number(session.metadata?.amount || (session.amount_total || 0) / 100);
   const description = session.metadata?.description || "Membership Auto-Pay";
   const planKey = session.metadata?.plan_key || "";
+  const paymentMethod = session.metadata?.payment_method === "bank" ? "bank" : "card";
+  const currency = (session.metadata?.currency || (paymentMethod === "bank" ? "usd" : "inr")).toLowerCase();
+  const methodLabel = paymentMethod === "bank" ? "Stripe Bank (ACH)" : "Stripe";
   const chargeDay = Math.min(new Date().getUTCDate(), 28);
 
   const { data: existingSub } = await supabase
@@ -67,7 +70,8 @@ async function activateTestAutoPay(
     referenceNumber: session.id,
     paidAt: new Date().toISOString(),
     description: "Monthly Membership — First month",
-    label: "Stripe",
+    label: methodLabel,
+    paymentMethod,
   });
 
   const fullSession = await stripe.checkout.sessions.retrieve(session.id, {
@@ -106,7 +110,7 @@ async function activateTestAutoPay(
     customer: customerId,
     items: [{
       price_data: {
-        currency: "inr",
+        currency,
         unit_amount: Math.round(amount * 100),
         product: product.id,
         recurring: { interval: "month" },
@@ -122,6 +126,8 @@ async function activateTestAutoPay(
       charge_day: String(chargeDay),
       contribution_type: "monthly",
       amount: String(amount),
+      payment_method: paymentMethod,
+      currency,
     },
   });
 
@@ -164,6 +170,7 @@ async function insertDashboardPayment(
     paidAt,
     description = "Monthly Membership Auto-Pay",
     label = "Stripe Auto-Pay",
+    paymentMethod = "card",
   }: {
     userId: string;
     amount: number;
@@ -171,6 +178,7 @@ async function insertDashboardPayment(
     paidAt: string;
     description?: string;
     label?: string;
+    paymentMethod?: string;
   },
 ) {
   if (!amount || amount <= 0 || !referenceNumber) {
@@ -199,7 +207,7 @@ async function insertDashboardPayment(
   if (pendingBill?.id) {
     const { error } = await supabase.rpc("complete_membership_payment", {
       p_billing_record_id: pendingBill.id,
-      p_payment_method: "card",
+      p_payment_method: paymentMethod,
       p_payment_method_label: label,
       p_reference_number: referenceNumber,
       p_paid_at: paidAt,
@@ -222,7 +230,7 @@ async function insertDashboardPayment(
     amount,
     description,
     status: "paid",
-    payment_method: "card",
+    payment_method: paymentMethod,
     payment_method_label: label,
     reference_number: referenceNumber,
     contribution_type: "monthly",
@@ -257,6 +265,9 @@ async function recordSubscriptionCharge(
     expand: ["latest_invoice"],
   });
 
+  const paymentMethod = sub.metadata?.payment_method === "bank" ? "bank" : "card";
+  const label = paymentMethod === "bank" ? "Stripe Bank (ACH)" : "Stripe";
+
   let latestInvoice = sub.latest_invoice;
   if (typeof latestInvoice === "string") {
     latestInvoice = await stripe.invoices.retrieve(latestInvoice);
@@ -279,6 +290,8 @@ async function recordSubscriptionCharge(
       amount,
       referenceNumber: latestInvoice.id,
       paidAt,
+      label,
+      paymentMethod,
     });
   }
 
@@ -291,7 +304,8 @@ async function recordSubscriptionCharge(
       referenceNumber: fallbackRef,
       paidAt: new Date().toISOString(),
       description: "Monthly Membership Contribution",
-      label: "Stripe",
+      label,
+      paymentMethod,
     });
   }
 
@@ -470,14 +484,16 @@ async function recordCompletedSession(
     const amount = (session.amount_total || 0) / 100;
     const billingRecordId = session.metadata?.billing_record_id;
     const contributionType = session.metadata?.contribution_type || "monthly";
+    const paymentMethod = session.metadata?.payment_method === "bank" ? "bank" : "card";
+    const methodLabel = paymentMethod === "bank" ? "Stripe Bank (ACH)" : "Stripe";
     const description =
       contributionType === "monthly" ? "Monthly Contribution" : "Membership Contribution";
 
     if (billingRecordId) {
       const { error } = await supabase.rpc("complete_membership_payment", {
         p_billing_record_id: Number(billingRecordId),
-        p_payment_method: "card",
-        p_payment_method_label: "Stripe",
+        p_payment_method: paymentMethod,
+        p_payment_method_label: methodLabel,
         p_reference_number: referenceNumber,
         p_paid_at: new Date().toISOString(),
         p_paid_amount: amount,
@@ -488,8 +504,8 @@ async function recordCompletedSession(
           amount,
           description: session.metadata?.notes?.trim() || description,
           status: "paid",
-          payment_method: "card",
-          payment_method_label: "Stripe",
+          payment_method: paymentMethod,
+          payment_method_label: methodLabel,
           reference_number: referenceNumber,
           contribution_type: contributionType,
           paid_at: new Date().toISOString(),
@@ -501,8 +517,8 @@ async function recordCompletedSession(
         amount,
         description: session.metadata?.notes?.trim() || description,
         status: "paid",
-        payment_method: "card",
-        payment_method_label: "Stripe",
+        payment_method: paymentMethod,
+        payment_method_label: methodLabel,
         reference_number: referenceNumber,
         contribution_type: contributionType,
         paid_at: new Date().toISOString(),
@@ -569,6 +585,12 @@ async function recordInvoicePaid(
     });
   }
 
+  const paymentMethod = sub.metadata?.payment_method === "bank" ? "bank" : "card";
+  const methodLabel = paymentMethod === "bank" ? "Stripe Bank (ACH)" : "Stripe Auto-Pay";
+  const money = (sub.metadata?.currency || "").toLowerCase() === "usd"
+    ? (n: number) => `$${n.toLocaleString("en-US")}`
+    : (n: number) => `₹${n.toLocaleString("en-IN")}`;
+
   const testMinutes = getTestMinutes(sub);
 
   // First month in test mode is a one-time checkout line — skip $0 subscription_create invoices.
@@ -609,6 +631,8 @@ async function recordInvoicePaid(
     referenceNumber,
     paidAt,
     description: testMinutes > 0 ? "Membership Auto-Pay (TEST)" : "Monthly Membership Auto-Pay",
+    label: methodLabel,
+    paymentMethod,
   });
 
   let nextCharge = new Date(sub.current_period_end * 1000).toISOString().slice(0, 10);
@@ -637,8 +661,8 @@ async function recordInvoicePaid(
     user_id: userId,
     title: testMinutes > 0 ? "Test Auto-Pay Successful" : "Auto-Pay Successful",
     body: testMinutes > 0
-      ? `₹${amount.toLocaleString("en-IN")} charged. Next TEST charge in ${testMinutes} minutes.`
-      : `Your monthly contribution of ₹${amount.toLocaleString("en-IN")} was charged automatically.`,
+      ? `${money(amount)} charged. Next TEST charge in ${testMinutes} minutes.`
+      : `Your monthly contribution of ${money(amount)} was charged automatically.`,
     type: "payment",
   });
 
@@ -817,13 +841,14 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (!existing && amount > 0) {
+        const piMethod = paymentIntent.metadata?.payment_method === "bank" ? "bank" : "card";
         await supabase.from("payments").insert({
           user_id: userId,
           amount,
           description: "Membership Auto-Pay (TEST)",
           status: "paid",
-          payment_method: "card",
-          payment_method_label: "Stripe Auto-Pay",
+          payment_method: piMethod,
+          payment_method_label: piMethod === "bank" ? "Stripe Bank (ACH)" : "Stripe Auto-Pay",
           reference_number: referenceNumber,
           contribution_type: "monthly",
           paid_at: new Date().toISOString(),

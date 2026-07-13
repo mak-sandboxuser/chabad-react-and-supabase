@@ -26,6 +26,7 @@ export async function createStripeCheckoutSession({
   contributionType = "monthly",
   autoPay = true,
   planKey = "",
+  paymentMethod = "card",
 }) {
   const { data, error } = await supabase.functions.invoke("create-checkout-session", {
     body: {
@@ -35,6 +36,7 @@ export async function createStripeCheckoutSession({
       contributionType: "monthly",
       autoPay: true,
       planKey,
+      paymentMethod,
       returnBaseUrl: window.location.origin,
     },
   });

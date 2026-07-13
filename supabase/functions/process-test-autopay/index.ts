@@ -27,7 +27,11 @@ function isAuthorized(req: Request) {
   return Boolean(serviceKey && auth === `Bearer ${serviceKey}`);
 }
 
-async function resolvePaymentMethodId(stripe: Stripe, customerId: string) {
+async function resolvePaymentMethodId(
+  stripe: Stripe,
+  customerId: string,
+  preferredType: "card" | "us_bank_account" = "card",
+) {
   const customer = await stripe.customers.retrieve(customerId);
   if (customer.deleted) return null;
 
@@ -35,12 +39,21 @@ async function resolvePaymentMethodId(stripe: Stripe, customerId: string) {
   if (typeof fromSettings === "string") return fromSettings;
   if (fromSettings && typeof fromSettings !== "string") return fromSettings.id;
 
-  const paymentMethods = await stripe.paymentMethods.list({
-    customer: customerId,
-    type: "card",
-    limit: 1,
-  });
-  return paymentMethods.data[0]?.id || null;
+  // Try the preferred type first, then fall back to the other type.
+  const types: Array<"card" | "us_bank_account"> =
+    preferredType === "us_bank_account"
+      ? ["us_bank_account", "card"]
+      : ["card", "us_bank_account"];
+
+  for (const type of types) {
+    const paymentMethods = await stripe.paymentMethods.list({
+      customer: customerId,
+      type,
+      limit: 1,
+    });
+    if (paymentMethods.data[0]?.id) return paymentMethods.data[0].id;
+  }
+  return null;
 }
 
 async function recordTestPayment(
@@ -50,11 +63,19 @@ async function recordTestPayment(
     amount,
     referenceNumber,
     testMinutes,
+    paymentMethod = "card",
+    methodLabel = "Stripe Auto-Pay",
+    currency = "inr",
+    pending = false,
   }: {
     userId: string;
     amount: number;
     referenceNumber: string;
     testMinutes: number;
+    paymentMethod?: string;
+    methodLabel?: string;
+    currency?: string;
+    pending?: boolean;
   },
 ) {
   const { data: existing } = await supabase
@@ -65,14 +86,18 @@ async function recordTestPayment(
 
   if (existing) return false;
 
+  const money = currency === "usd"
+    ? `$${amount.toLocaleString("en-US")}`
+    : `₹${amount.toLocaleString("en-IN")}`;
+
   const paidAt = new Date().toISOString();
   const { error } = await supabase.from("payments").insert({
     user_id: userId,
     amount,
     description: "Membership Auto-Pay (TEST)",
-    status: "paid",
-    payment_method: "card",
-    payment_method_label: "Stripe Auto-Pay",
+    status: pending ? "pending" : "paid",
+    payment_method: paymentMethod,
+    payment_method_label: methodLabel,
     reference_number: referenceNumber,
     contribution_type: "monthly",
     paid_at: paidAt,
@@ -83,7 +108,9 @@ async function recordTestPayment(
   await supabase.from("notifications").insert({
     user_id: userId,
     title: "Test Auto-Pay Successful",
-    body: `₹${amount.toLocaleString("en-IN")} charged. Next TEST charge in ${testMinutes} minutes.`,
+    body: pending
+      ? `${money} bank debit initiated. It may take a few days to clear. Next TEST charge in ${testMinutes} minutes.`
+      : `${money} charged. Next TEST charge in ${testMinutes} minutes.`,
     type: "payment",
   });
 
@@ -141,9 +168,15 @@ async function chargeDueSubscription(
     return { subscriptionId, error: "Missing Stripe customer." };
   }
 
-  const paymentMethodId = await resolvePaymentMethodId(stripe, customerId);
+  const isBank = sub.metadata?.payment_method === "bank";
+  const paymentMethodType = isBank ? "us_bank_account" : "card";
+  const currency = (sub.metadata?.currency || (isBank ? "usd" : "inr")).toLowerCase();
+  const dbMethod = isBank ? "bank" : "card";
+  const methodLabel = isBank ? "Stripe Bank (ACH)" : "Stripe Auto-Pay";
+
+  const paymentMethodId = await resolvePaymentMethodId(stripe, customerId, paymentMethodType);
   if (!paymentMethodId) {
-    return { subscriptionId, error: "No saved card on file for auto-pay." };
+    return { subscriptionId, error: `No saved ${dbMethod} on file for auto-pay.` };
   }
 
   const amount = Number(row.amount || sub.metadata?.amount || 0);
@@ -153,9 +186,10 @@ async function chargeDueSubscription(
 
   const paymentIntent = await stripe.paymentIntents.create({
     amount: Math.round(amount * 100),
-    currency: "inr",
+    currency,
     customer: customerId,
     payment_method: paymentMethodId,
+    payment_method_types: [paymentMethodType],
     off_session: true,
     confirm: true,
     description: "Membership Auto-Pay (TEST)",
@@ -164,10 +198,16 @@ async function chargeDueSubscription(
       subscription_id: subscriptionId,
       test_mode: "true",
       auto_pay_test: "true",
+      payment_method: dbMethod,
     },
   });
 
-  if (paymentIntent.status !== "succeeded") {
+  // Card debits settle instantly ("succeeded"); ACH bank debits settle
+  // asynchronously and report "processing" first — both count as accepted.
+  const acceptedStatuses = isBank
+    ? ["succeeded", "processing"]
+    : ["succeeded"];
+  if (!acceptedStatuses.includes(paymentIntent.status)) {
     return {
       subscriptionId,
       error: `Payment status: ${paymentIntent.status}`,
@@ -188,6 +228,10 @@ async function chargeDueSubscription(
     amount,
     referenceNumber: paymentIntent.id,
     testMinutes,
+    paymentMethod: dbMethod,
+    methodLabel,
+    currency,
+    pending: isBank && paymentIntent.status === "processing",
   });
 
   const nextChargeDate = new Date(nextUnix * 1000).toISOString().slice(0, 10);

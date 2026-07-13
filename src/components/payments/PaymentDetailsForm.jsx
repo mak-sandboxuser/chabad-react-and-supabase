@@ -1,5 +1,9 @@
 import { useState } from "react";
 import { formatCurrency, PLAN_PRICES } from "../../lib/format";
+import PaymentMethodCard from "./PaymentMethodCard";
+
+const CARD_ICON = "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z";
+const BANK_ICON = "M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11m4-11v11m4-11v11m4-11v11";
 
 export default function PaymentDetailsForm({
   defaultAmount = "100",
@@ -12,10 +16,12 @@ export default function PaymentDetailsForm({
 }) {
   const [autoPay, setAutoPay] = useState(true);
   const [notes, setNotes] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("card");
   const [error, setError] = useState("");
 
   const monthly = Number(defaultAmount) || 100;
   const annual = planKey && PLAN_PRICES[planKey] ? PLAN_PRICES[planKey] : monthly * 12;
+  const isBank = paymentMethod === "bank";
 
   const handlePay = async () => {
     setError("");
@@ -36,6 +42,7 @@ export default function PaymentDetailsForm({
         contributionType: "monthly",
         notes,
         autoPay: true,
+        paymentMethod,
         description: `${planLabel} Membership — Monthly Auto-Pay`,
       });
     } catch (err) {
@@ -92,6 +99,28 @@ export default function PaymentDetailsForm({
         </span>
       </label>
 
+      <div className="mb-6">
+        <label className="block text-[13px] font-semibold text-gray-700 mb-2">Payment method</label>
+        <div className="grid grid-cols-2 gap-3">
+          <PaymentMethodCard
+            icon={CARD_ICON}
+            iconColor="text-[#635bff]"
+            title="Card"
+            description="Debit or credit card. Billed in ₹ (INR)."
+            selected={!isBank}
+            onSelect={() => setPaymentMethod("card")}
+          />
+          <PaymentMethodCard
+            icon={BANK_ICON}
+            iconColor="text-[#0f766e]"
+            title="Bank account"
+            description="Direct debit (ACH). Billed in $ (USD)."
+            selected={isBank}
+            onSelect={() => setPaymentMethod("bank")}
+          />
+        </div>
+      </div>
+
       <div className="mb-6 rounded-xl border border-[#dbeafe] bg-[#f8fbff] px-4 py-4 flex items-start gap-3">
         <div className="w-10 h-10 rounded-xl bg-[#635bff] flex items-center justify-center shrink-0">
           <span className="text-white text-[13px] font-bold">S</span>
@@ -99,7 +128,9 @@ export default function PaymentDetailsForm({
         <div>
           <p className="text-[13px] font-semibold text-gray-800">Pay securely with Stripe</p>
           <p className="text-[12px] text-gray-500 mt-0.5">
-            You will be redirected to Stripe to complete payment with card. We never store your card details.
+            {isBank
+              ? "You will be redirected to Stripe to link and verify your bank account. Bank debits are billed in USD and may take a few days to settle. We never store your bank details."
+              : "You will be redirected to Stripe to complete payment with card. We never store your card details."}
           </p>
         </div>
       </div>
@@ -133,7 +164,7 @@ export default function PaymentDetailsForm({
       >
         {paying
           ? "Redirecting to Stripe..."
-          : `Pay ${formatCurrency(monthly)} & Enable Auto-Pay`}
+          : `Pay ${isBank ? `$${monthly}` : formatCurrency(monthly)} by ${isBank ? "bank" : "card"} & Enable Auto-Pay`}
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
         </svg>

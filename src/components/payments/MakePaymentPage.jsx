@@ -124,7 +124,7 @@ export default function MakePaymentPage() {
     runVerification(sessionId);
   }, [paidSuccess, sessionId]);
 
-  const handlePayWithStripe = async ({ amount, description, notes }) => {
+  const handlePayWithStripe = async ({ amount, description, notes, paymentMethod }) => {
     setPaying(true);
     try {
       setPaymentData({
@@ -139,6 +139,7 @@ export default function MakePaymentPage() {
         contributionType: "monthly",
         autoPay: true,
         planKey,
+        paymentMethod,
       });
 
       window.location.href = url;
