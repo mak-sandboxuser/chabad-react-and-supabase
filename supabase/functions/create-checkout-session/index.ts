@@ -841,12 +841,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    // --- CREATE membership Auto-Pay checkout (subscription only) ---
+    // --- CREATE membership checkout ---
     const amount = Number(body.amount);
     const description = body.description || "Membership Monthly Auto-Pay";
     const notes = body.notes || "";
     const planKey = body.planKey ? String(body.planKey) : "";
     const methodConfig = getMethodConfig(body.paymentMethod);
+    const autoPay = body.autoPay !== false && body.autoPay !== "false";
 
     if (!amount || amount < 1) {
       return new Response(JSON.stringify({ error: "Enter a valid payment amount." }), {
@@ -883,6 +884,41 @@ Deno.serve(async (req) => {
 
     const testMinutes = getTestMinutes();
     const chargeDay = Math.min(new Date().getUTCDate(), 28);
+
+    // One-time payment only (Auto-Pay checkbox unchecked).
+    if (!autoPay) {
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        customer: customerId,
+        payment_method_types: methodConfig.stripeTypes,
+        line_items: [{
+          price_data: {
+            currency: methodConfig.currency,
+            unit_amount: Math.round(amount * 100),
+            product_data: { name: description || "Membership One-time Payment" },
+          },
+          quantity: 1,
+        }],
+        metadata: {
+          user_id: user.id,
+          notes,
+          auto_pay: "false",
+          test_mode: "false",
+          contribution_type: "monthly",
+          plan_key: planKey,
+          amount: String(amount),
+          description,
+          payment_method: methodConfig.dbMethod,
+          currency: methodConfig.currency,
+        },
+        success_url: `${siteUrl}/payments?success=true&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${siteUrl}/payments?canceled=true`,
+      });
+
+      return new Response(JSON.stringify({ url: session.url, sessionId: session.id }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const subscriptionMetadata = {
       user_id: user.id,

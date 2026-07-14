@@ -26,11 +26,6 @@ export default function PaymentDetailsForm({
   const handlePay = async () => {
     setError("");
 
-    if (!autoPay) {
-      setError("Turn on Auto-Pay to continue. Membership is billed monthly with Auto-Pay.");
-      return;
-    }
-
     if (!monthly || monthly < 1) {
       setError("Membership monthly amount is missing. Choose a plan at signup first.");
       return;
@@ -41,9 +36,11 @@ export default function PaymentDetailsForm({
         amount: monthly,
         contributionType: "monthly",
         notes,
-        autoPay: true,
+        autoPay,
         paymentMethod,
-        description: `${planLabel} Membership — Monthly Auto-Pay`,
+        description: autoPay
+          ? `${planLabel} Membership — Monthly Auto-Pay`
+          : `${planLabel} Membership — One-time Payment`,
       });
     } catch (err) {
       setError(err.message || "Payment could not be started.");
@@ -52,7 +49,7 @@ export default function PaymentDetailsForm({
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-6">
-      <h3 className="text-[16px] font-semibold text-gray-800 mb-6">Membership Auto-Pay</h3>
+      <h3 className="text-[16px] font-semibold text-gray-800 mb-6">Membership Payment</h3>
 
       <div className="mb-6 rounded-xl border border-gray-100 bg-[#f8fafc] px-4 py-4">
         <p className="text-[12px] text-gray-400 font-medium mb-1">Selected plan</p>
@@ -78,7 +75,7 @@ export default function PaymentDetailsForm({
           />
         </div>
         <p className="text-[12px] text-gray-400 mt-2">
-          Fixed by your membership plan. You pay this amount today, then on Auto-Pay.
+          Fixed by your membership plan. Pay once now, or enable Auto-Pay for recurring monthly charges.
         </p>
       </div>
 
@@ -90,11 +87,13 @@ export default function PaymentDetailsForm({
           className="mt-1 w-4 h-4 rounded border-gray-300 text-[#1a2a5e] focus:ring-[#1a2a5e]"
         />
         <span>
-          <span className="block text-[14px] font-semibold text-[#1a2a5e]">Enable Auto-Pay</span>
+          <span className="block text-[14px] font-semibold text-[#1a2a5e]">Enable Auto-Pay (optional)</span>
           <span className="block text-[12px] text-gray-600 mt-1">
-            {testMode
-              ? `Pay ${formatCurrency(monthly)} now. For testing, Stripe will charge again every ${testMinutes} minutes (stops automatically after 12 charges).`
-              : `Pay ${formatCurrency(monthly)} now. Stripe charges the same amount on this date each month for 12 months, then auto-pay stops automatically.`}
+            {autoPay
+              ? (testMode
+                ? `Pay ${formatCurrency(monthly)} now. For testing, Stripe will charge again every ${testMinutes} minutes (stops automatically after 12 charges).`
+                : `Pay ${formatCurrency(monthly)} now. Stripe charges the same amount on this date each month for 12 months, then auto-pay stops automatically.`)
+              : `Pay ${formatCurrency(monthly)} once now. No future automatic charges.`}
           </span>
         </span>
       </label>
@@ -159,12 +158,14 @@ export default function PaymentDetailsForm({
       <button
         type="button"
         onClick={handlePay}
-        disabled={paying || !autoPay}
+        disabled={paying}
         className="flex items-center gap-2 bg-[#635bff] hover:bg-[#5851e5] disabled:opacity-60 text-white text-[13px] font-semibold px-5 py-3 rounded-xl transition-colors"
       >
         {paying
           ? "Redirecting to Stripe..."
-          : `Pay ${isBank ? `$${monthly}` : formatCurrency(monthly)} by ${isBank ? "bank" : "card"} & Enable Auto-Pay`}
+          : autoPay
+            ? `Pay ${isBank ? `$${monthly}` : formatCurrency(monthly)} by ${isBank ? "bank" : "card"} & Enable Auto-Pay`
+            : `Pay ${isBank ? `$${monthly}` : formatCurrency(monthly)} by ${isBank ? "bank" : "card"} (one-time)`}
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
         </svg>

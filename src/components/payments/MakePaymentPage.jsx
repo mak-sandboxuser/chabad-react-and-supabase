@@ -124,12 +124,14 @@ export default function MakePaymentPage() {
     runVerification(sessionId);
   }, [paidSuccess, sessionId]);
 
-  const handlePayWithStripe = async ({ amount, description, notes, paymentMethod }) => {
+  const handlePayWithStripe = async ({ amount, description, notes, paymentMethod, autoPay = true }) => {
     setPaying(true);
     try {
       setPaymentData({
         amount: String(amount),
-        contributionType: `${planLabel} Membership — Monthly Auto-Pay`,
+        contributionType: autoPay
+          ? `${planLabel} Membership — Monthly Auto-Pay`
+          : `${planLabel} Membership — One-time Payment`,
       });
 
       const { url } = await createStripeCheckoutSession({
@@ -137,7 +139,7 @@ export default function MakePaymentPage() {
         description,
         notes,
         contributionType: "monthly",
-        autoPay: true,
+        autoPay,
         planKey,
         paymentMethod,
       });
@@ -185,7 +187,7 @@ export default function MakePaymentPage() {
         <TopBar userName={userName} notificationCount={notificationCount} title="Make a Payment" />
         <div className="bg-white px-6 -mt-px pb-3 border-b border-gray-100">
           <p className="text-[13px] text-gray-400">
-            Pay your membership monthly amount and enable Auto-Pay with Stripe.
+            Pay your membership amount with Stripe. Auto-Pay is optional.
           </p>
         </div>
 
@@ -201,17 +203,21 @@ export default function MakePaymentPage() {
               {paidSuccess && verifyState.verified && (
                 <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-4">
                   <p className="text-[14px] font-semibold text-green-800">
-                    Membership payment & Auto-Pay active
+                    {verifyState.autoPay
+                      ? "Membership payment & Auto-Pay active"
+                      : "Payment successful"}
                   </p>
                   <p className="text-[13px] text-green-700 mt-1">
                     {verifyState.paymentRecorded
                       ? `${formatCurrency(verifyState.amount)} was charged and added to your dashboard.`
-                      : `${formatCurrency(verifyState.amount)} Auto-Pay is active.`}
-                    {verifyState.testMode
-                      ? ` Next test charge in about ${TEST_MINUTES} minutes${nextChargeLabel ? ` (${nextChargeLabel})` : ""}.`
-                      : nextChargeLabel
-                        ? ` Next charge: ${nextChargeLabel}.`
-                        : " Future charges will run on this date each month."}
+                      : `${formatCurrency(verifyState.amount)} payment is complete.`}
+                    {verifyState.autoPay
+                      ? (verifyState.testMode
+                        ? ` Next test charge in about ${TEST_MINUTES} minutes${nextChargeLabel ? ` (${nextChargeLabel})` : ""}.`
+                        : nextChargeLabel
+                          ? ` Next charge: ${nextChargeLabel}.`
+                          : " Future charges will run on this date each month.")
+                      : " This was a one-time payment — Auto-Pay was not enabled."}
                   </p>
                   <div className="flex items-center gap-3 mt-3">
                     <Link

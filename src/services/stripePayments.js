@@ -34,7 +34,7 @@ export async function createStripeCheckoutSession({
       description,
       notes,
       contributionType: "monthly",
-      autoPay: true,
+      autoPay: Boolean(autoPay),
       planKey,
       paymentMethod,
       returnBaseUrl: window.location.origin,
