@@ -254,6 +254,14 @@ export async function markAllNotificationsRead(userId) {
   if (error) throw error;
 }
 
+export async function markNotificationRead(notificationId) {
+  const { error } = await supabase
+    .from("notifications")
+    .update({ is_read: true })
+    .eq("id", notificationId);
+  if (error) throw error;
+}
+
 function getDisplayName(profile, user) {
   const metadata = user?.user_metadata || {};
   return (
