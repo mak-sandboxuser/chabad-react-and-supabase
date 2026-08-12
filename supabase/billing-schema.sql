@@ -4,8 +4,8 @@
 -- Run in Supabase SQL Editor after schema.sql
 --
 -- Business rules:
---   • Annual plans: Basic ₹1,200/yr | Standard ₹2,400/yr | Premium ₹3,600/yr
---   • Monthly contribution: ₹100 | ₹200 | ₹300 per month
+--   • Annual plans: Basic $1,200/yr | Standard $2,400/yr | Premium $3,600/yr
+--   • Monthly contribution: $100 | $200 | $300 per month
 --   • Payment window: 1st–10th of each month
 --   • Auto-create Pending record on month start
 --   • Paid on/before 10th → Paid + membership Active
@@ -26,7 +26,7 @@ create table if not exists public.membership_plans (
   plan_key      text not null unique check (plan_key in ('basic', 'standard', 'premium')),
   name          text not null,
   monthly_amount numeric(12,2) not null check (monthly_amount > 0),
-  currency      text not null default 'INR',
+  currency      text not null default 'USD',
   is_active     boolean not null default true,
   sort_order    smallint not null default 0,
   created_at    timestamptz not null default now(),
@@ -52,7 +52,7 @@ create table if not exists public.billing_rules (
   payment_window_start_day smallint not null default 1  check (payment_window_start_day between 1 and 28),
   payment_window_end_day   smallint not null default 10 check (payment_window_end_day between 1 and 28),
   billing_cycle            text not null default 'monthly' check (billing_cycle in ('monthly')),
-  currency                 text not null default 'INR',
+  currency                 text not null default 'USD',
   reminder_days            int[] not null default array[5, 8, 10],
   send_overdue_reminder    boolean not null default true,
   timezone                 text not null default 'Asia/Kolkata',
@@ -70,7 +70,7 @@ on conflict (id) do nothing;
 alter table public.memberships
   add column if not exists plan_id bigint references public.membership_plans(id),
   add column if not exists monthly_amount numeric(12,2),
-  add column if not exists billing_status text default 'active';
+  add column if not exists billing_status text default 'pending';
 
 -- Expand membership status for billing lifecycle
 alter table public.memberships drop constraint if exists memberships_status_check;
@@ -118,7 +118,7 @@ create table if not exists public.membership_billing_records (
   billing_year    smallint not null,
   billing_month   smallint not null check (billing_month between 1 and 12),
   amount          numeric(12,2) not null check (amount >= 0),
-  currency        text not null default 'INR',
+  currency        text not null default 'USD',
   due_date        date not null,          -- 10th of billing month
   payment_date    timestamptz,            -- when marked paid
   status          text not null default 'pending'
@@ -147,7 +147,7 @@ create table if not exists public.membership_payment_transactions (
   user_id             uuid not null references auth.users(id) on delete cascade,
   membership_id       bigint not null references public.memberships(id) on delete cascade,
   amount              numeric(12,2) not null check (amount > 0),
-  currency            text not null default 'INR',
+  currency            text not null default 'USD',
   payment_method      text default 'card',
   payment_method_label text,
   reference_number    text,
@@ -445,7 +445,7 @@ begin
         if found then
           v_title := 'Membership Payment Reminder';
           v_body := format(
-            'Your %s payment of ₹%s for %s is due by %s.',
+            'Your %s payment of $%s for %s is due by %s.',
             v_row.plan_name, v_row.amount::text, to_char(v_row.billing_period, 'Mon YYYY'), to_char(v_row.due_date, 'DD Mon YYYY')
           );
 
@@ -467,7 +467,7 @@ begin
         values (
           v_row.user_id,
           'Payment Overdue',
-          format('Your %s payment for %s is overdue. Please pay ₹%s to restore active membership.',
+          format('Your %s payment for %s is overdue. Please pay $%s to restore active membership.',
             v_row.plan_name, to_char(v_row.billing_period, 'Mon YYYY'), v_row.amount::text),
           'warning'
         );
@@ -579,7 +579,7 @@ begin
     monthly_amount, annual_commitment, started_at, renewal_date, notes
   )
   values (
-    new.id, v_plan.id, v_plan.plan_key, v_plan.name, 'active', 'active',
+    new.id, v_plan.id, v_plan.plan_key, v_plan.name, 'pending', 'pending',
     v_plan.monthly_amount,
     case v_plan.plan_key
       when 'basic' then 1200
@@ -611,8 +611,8 @@ begin
   insert into public.notifications (user_id, title, body, type)
   values (
     new.id, 'Welcome to Chabad Bedford',
-    'Your ' || v_plan.name || ' plan (₹' || v_plan.monthly_amount::text || '/month) is active.',
-    'success'
+    'Your ' || v_plan.name || ' plan ($' || v_plan.monthly_amount::text || '/month) is ready. Complete a payment to activate your membership.',
+    'info'
   );
 
   return new;

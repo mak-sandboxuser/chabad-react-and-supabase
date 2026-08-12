@@ -1,4 +1,4 @@
--- Fix payments recorded at annual price (₹2,400) instead of actual Stripe charge (₹200).
+-- Fix payments recorded at annual price ($2,400) instead of actual Stripe charge ($200).
 -- Run in Supabase SQL Editor after deploying updated Edge Functions.
 
 -- 1) Update RPC to accept actual paid amount (re-run from billing-schema.sql or this block)

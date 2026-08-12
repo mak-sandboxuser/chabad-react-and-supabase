@@ -83,7 +83,7 @@ async function activateTestAutoPay(
   const description = session.metadata?.description || "Membership Auto-Pay";
   const planKey = session.metadata?.plan_key || "";
   const paymentMethod = session.metadata?.payment_method === "bank" ? "bank" : "card";
-  const currency = (session.metadata?.currency || (paymentMethod === "bank" ? "usd" : "inr")).toLowerCase();
+  const currency = (session.metadata?.currency || "usd").toLowerCase();
   const methodLabel = paymentMethod === "bank" ? "Stripe Bank (ACH)" : "Stripe";
   const chargeDay = Math.min(new Date().getUTCDate(), 28);
 
@@ -190,7 +190,7 @@ async function activateTestAutoPay(
   await supabase.from("notifications").insert({
     user_id: userId,
     title: "Auto-Pay Enabled",
-    body: `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. TEST mode: next charge in ${testMinutes} minutes.`,
+    body: `Your first payment of $${amount.toLocaleString("en-US")} is complete. TEST mode: next charge in ${testMinutes} minutes.`,
     type: "payment",
   });
 
@@ -256,7 +256,7 @@ async function insertDashboardPayment(
       await supabase.from("notifications").insert({
         user_id: userId,
         title: "Payment Successful",
-        body: `Your payment of ₹${amount.toLocaleString("en-IN")} was processed successfully via Stripe Auto-Pay.`,
+        body: `Your payment of $${amount.toLocaleString("en-US")} was processed successfully via Stripe Auto-Pay.`,
         type: "payment",
       });
       return { recorded: true, amount };
@@ -285,7 +285,7 @@ async function insertDashboardPayment(
   await supabase.from("notifications").insert({
     user_id: userId,
     title: "Payment Successful",
-    body: `Your payment of ₹${amount.toLocaleString("en-IN")} was processed successfully via Stripe Auto-Pay.`,
+    body: `Your payment of $${amount.toLocaleString("en-US")} was processed successfully via Stripe Auto-Pay.`,
     type: "payment",
   });
 
@@ -480,8 +480,8 @@ async function activateAutoPay(
         user_id: userId,
         title: "Auto-Pay Enabled",
         body: testMinutes > 0
-          ? `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. TEST mode: next charge in ${testMinutes} minutes.`
-          : `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. Auto-pay will charge the same amount on this date each month.`,
+          ? `Your first payment of $${amount.toLocaleString("en-US")} is complete. TEST mode: next charge in ${testMinutes} minutes.`
+          : `Your first payment of $${amount.toLocaleString("en-US")} is complete. Auto-pay will charge the same amount on this date each month.`,
         type: "payment",
       });
     }
@@ -593,7 +593,7 @@ async function recordCompletedSession(
     await supabase.from("notifications").insert({
       user_id: userId,
       title: "Payment Successful",
-      body: `Your payment of ₹${amount.toLocaleString("en-IN")} was processed successfully via Stripe.`,
+      body: `Your payment of $${amount.toLocaleString("en-US")} was processed successfully via Stripe.`,
       type: "payment",
     });
   }
@@ -628,9 +628,7 @@ async function recordInvoicePaid(
 
   const paymentMethod = sub.metadata?.payment_method === "bank" ? "bank" : "card";
   const methodLabel = paymentMethod === "bank" ? "Stripe Bank (ACH)" : "Stripe Auto-Pay";
-  const money = (sub.metadata?.currency || "").toLowerCase() === "usd"
-    ? (n: number) => `$${n.toLocaleString("en-US")}`
-    : (n: number) => `₹${n.toLocaleString("en-IN")}`;
+  const money = (n: number) => `$${n.toLocaleString("en-US")}`;
 
   const testMinutes = getTestMinutes(sub);
 

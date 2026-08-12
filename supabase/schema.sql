@@ -63,7 +63,7 @@ create table if not exists public.memberships (
   user_id uuid not null references auth.users(id) on delete cascade,
   plan_key text not null check (plan_key in ('basic', 'standard', 'premium')),
   membership_name text,
-  status text not null default 'active' check (status in ('active', 'paused', 'cancelled', 'pending')),
+  status text not null default 'pending' check (status in ('active', 'paused', 'cancelled', 'pending')),
   annual_commitment numeric(12,2) not null default 0,
   started_at date not null default current_date,
   renewal_date date,
@@ -176,6 +176,7 @@ create table if not exists public.recurring_contributions (
   frequency text not null default 'monthly',
   next_charge_date date,
   status text not null default 'active' check (status in ('active', 'paused', 'cancelled')),
+  stripe_payment_method_id text,
   created_at timestamptz not null default now()
 );
 
@@ -190,6 +191,7 @@ create table if not exists public.payment_methods (
   last_four text,
   is_primary boolean not null default false,
   expires_at date,
+  stripe_payment_method_id text,
   created_at timestamptz not null default now()
 );
 
@@ -389,7 +391,7 @@ begin
     new.id,
     selected_plan,
     plan_display_name,
-    'active',
+    'pending',
     selected_commitment,
     (current_date + interval '1 year')::date,
     'Thank you for joining our community.'

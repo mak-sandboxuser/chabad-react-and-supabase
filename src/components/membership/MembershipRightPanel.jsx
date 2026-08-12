@@ -1,4 +1,5 @@
 import { formatCurrency, formatDate } from "../../lib/format";
+import { getStatusBadgeClass } from "../../lib/membershipStatus";
 
 const SummaryRow = ({ icon, label, value, valueClass = "text-gray-800" }) => (
   <div className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
@@ -15,19 +16,31 @@ const SummaryRow = ({ icon, label, value, valueClass = "text-gray-800" }) => (
 export default function MembershipRightPanel({ panel }) {
   if (!panel) return null;
 
+  const isActive = panel.status === "active";
+
   return (
     <div className="space-y-5">
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
         <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-full bg-[#dcfce7] flex items-center justify-center shrink-0 mt-0.5">
-            <svg className="w-4 h-4 text-[#16a34a]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${isActive ? "bg-[#dcfce7]" : "bg-[#fef9c3]"}`}>
+            {isActive ? (
+              <svg className="w-4 h-4 text-[#16a34a]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4 text-[#a16207]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
           </div>
           <div>
-            <p className="text-[13px] font-bold text-[#16a34a] leading-snug">Your membership is active!</p>
+            <p className={`text-[13px] font-bold leading-snug ${isActive ? "text-[#16a34a]" : "text-[#a16207]"}`}>
+              {isActive ? "Your membership is active!" : "Your membership is pending"}
+            </p>
             <p className="text-[12px] text-gray-500 mt-1 leading-snug">
-              Thank you for your continued support and commitment.
+              {isActive
+                ? "Thank you for your continued support and commitment."
+                : "Make your first payment to activate your membership."}
             </p>
           </div>
         </div>
@@ -60,7 +73,7 @@ export default function MembershipRightPanel({ panel }) {
             </svg>
             <span className="text-[12px] text-gray-500">Current Status</span>
           </div>
-          <span className="bg-[#dcfce7] text-[#16a34a] text-[11px] font-semibold px-2.5 py-0.5 rounded-full capitalize">
+          <span className={`${getStatusBadgeClass(panel.status)} text-[11px] font-semibold px-2.5 py-0.5 rounded-full capitalize`}>
             {panel.status}
           </span>
         </div>
@@ -71,7 +84,7 @@ export default function MembershipRightPanel({ panel }) {
         />
       </div>
 
-      {panel.renewalDate && (
+      {isActive && panel.renewalDate && (
         <div className="bg-[#fff8f0] rounded-2xl border border-[#fed7aa] p-5">
           <div className="flex items-start gap-3 mb-3">
             <div className="w-8 h-8 rounded-lg bg-[#ffedd5] flex items-center justify-center shrink-0">

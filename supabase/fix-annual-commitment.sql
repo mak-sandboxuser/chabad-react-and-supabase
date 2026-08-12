@@ -1,4 +1,4 @@
--- Fix wrong annual_commitment (e.g. Standard showing ₹28,800 instead of ₹2,400/year)
+-- Fix wrong annual_commitment (e.g. Standard showing $28,800 instead of $2,400/year)
 -- Run in Supabase SQL Editor
 
 update public.membership_plans

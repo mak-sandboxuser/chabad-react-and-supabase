@@ -1,4 +1,5 @@
 import { formatDate } from "../../lib/format";
+import { getStatusBadgeClass } from "../../lib/membershipStatus";
 
 export default function FinancialRightPanel({ panel }) {
   if (!panel) return null;
@@ -19,7 +20,7 @@ export default function FinancialRightPanel({ panel }) {
             <div key={label} className="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0">
               <span className="text-[12px] text-gray-500">{label}</span>
               {badge ? (
-                <span className="bg-[#dcfce7] text-[#16a34a] text-[10px] font-semibold px-2.5 py-0.5 rounded-full capitalize">
+                <span className={`${getStatusBadgeClass(value)} text-[10px] font-semibold px-2.5 py-0.5 rounded-full capitalize`}>
                   {value}
                 </span>
               ) : (

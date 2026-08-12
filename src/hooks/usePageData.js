@@ -94,8 +94,11 @@ export function useDashboardData() {
 export function useMembershipData() {
   return useAsyncData(async () => {
     const user = await getAuthUser();
-    const membership = await fetchMembership(user.id);
-    return buildMembershipData({ membership });
+    const [membership, payments] = await Promise.all([
+      fetchMembership(user.id),
+      fetchPayments(user.id),
+    ]);
+    return buildMembershipData({ membership, payments });
   });
 }
 
@@ -151,11 +154,12 @@ export function useContributionsData() {
 export function useProfileData() {
   return useAsyncData(async () => {
     const user = await getAuthUser();
-    const [profile, membership] = await Promise.all([
+    const [profile, membership, payments] = await Promise.all([
       fetchProfile(user.id),
       fetchMembership(user.id),
+      fetchPayments(user.id),
     ]);
-    return buildProfileData({ profile, membership, user });
+    return buildProfileData({ profile, membership, user, payments });
   });
 }
 

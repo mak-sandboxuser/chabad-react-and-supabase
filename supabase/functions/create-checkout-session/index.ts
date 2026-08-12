@@ -11,7 +11,7 @@ const DEFAULT_TEST_MINUTES = 10;
 
 /**
  * Maps the requested payment method to its Stripe checkout config.
- * Card runs in INR (existing behaviour). Bank uses ACH direct debit,
+ * Card runs in USD. Bank uses ACH direct debit,
  * which Stripe only settles in USD. Currencies are overridable via env.
  */
 function getMethodConfig(method?: unknown) {
@@ -28,7 +28,7 @@ function getMethodConfig(method?: unknown) {
   return {
     key: "card" as const,
     stripeTypes: ["card"],
-    currency: (Deno.env.get("CARD_CURRENCY") || "inr").toLowerCase(),
+    currency: (Deno.env.get("CARD_CURRENCY") || "usd").toLowerCase(),
     dbMethod: "card",
     label: "Stripe",
   };
@@ -90,7 +90,7 @@ async function activateTestAutoPay(
   const description = session.metadata?.description || "Membership Auto-Pay";
   const planKey = session.metadata?.plan_key || "";
   const paymentMethod = session.metadata?.payment_method === "bank" ? "bank" : "card";
-  const currency = (session.metadata?.currency || (paymentMethod === "bank" ? "usd" : "inr")).toLowerCase();
+  const currency = (session.metadata?.currency || "usd").toLowerCase();
   const methodLabel = paymentMethod === "bank" ? "Stripe Bank (ACH)" : "Stripe";
   const chargeDay = Math.min(new Date().getUTCDate(), 28);
 
@@ -201,7 +201,7 @@ async function activateTestAutoPay(
   await supabase.from("notifications").insert({
     user_id: userId,
     title: "Auto-Pay Enabled",
-    body: `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. TEST mode: next charge in ${testMinutes} minutes.`,
+    body: `Your first payment of $${amount.toLocaleString("en-US")} is complete. TEST mode: next charge in ${testMinutes} minutes.`,
     type: "payment",
   });
 
@@ -313,7 +313,7 @@ async function insertDashboardPayment(
       await supabase.from("notifications").insert({
         user_id: userId,
         title: "Payment Successful",
-        body: `Your payment of ₹${amount.toLocaleString("en-IN")} was processed successfully via Stripe Auto-Pay.`,
+        body: `Your payment of $${amount.toLocaleString("en-US")} was processed successfully via Stripe Auto-Pay.`,
         type: "payment",
       });
       return { recorded: true, amount };
@@ -343,7 +343,7 @@ async function insertDashboardPayment(
   await supabase.from("notifications").insert({
     user_id: userId,
     title: "Payment Successful",
-    body: `Your payment of ₹${amount.toLocaleString("en-IN")} was processed successfully via Stripe Auto-Pay.`,
+    body: `Your payment of $${amount.toLocaleString("en-US")} was processed successfully via Stripe Auto-Pay.`,
     type: "payment",
   });
 
@@ -577,8 +577,8 @@ async function activateAutoPay(
       user_id: userId,
       title: "Auto-Pay Enabled",
       body: testMinutes > 0
-        ? `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. TEST mode: next charge in ${testMinutes} minutes.`
-        : `Your first payment of ₹${amount.toLocaleString("en-IN")} is complete. Auto-pay will charge the same amount on this date each month.`,
+        ? `Your first payment of $${amount.toLocaleString("en-US")} is complete. TEST mode: next charge in ${testMinutes} minutes.`
+        : `Your first payment of $${amount.toLocaleString("en-US")} is complete. Auto-pay will charge the same amount on this date each month.`,
       type: "payment",
     });
   }
@@ -719,7 +719,7 @@ async function recordCompletedSession(
   await supabase.from("notifications").insert({
     user_id: userId,
     title: "Payment Successful",
-    body: `Your payment of ₹${amount.toLocaleString("en-IN")} was processed successfully via Stripe.`,
+    body: `Your payment of $${amount.toLocaleString("en-US")} was processed successfully via Stripe.`,
     type: "payment",
   });
 
@@ -769,9 +769,297 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const siteUrl = resolveReturnBaseUrl(body.returnBaseUrl, configuredSiteUrl);
     const stripe = new Stripe(stripeSecret, { apiVersion: "2023-10-16" });
+    const action = String(body.action || "").toLowerCase();
+
+    // --- SAVE CARD: create Setup Checkout (no charge) ---
+    if (action === "save_card" || action === "create_setup") {
+      if (!serviceKey) {
+        throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured.");
+      }
+      const supabaseAdmin = createClient(supabaseUrl, serviceKey);
+
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("stripe_customer_id, full_name, email")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      let customerId = profile?.stripe_customer_id as string | null | undefined;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: user.email || profile?.email || undefined,
+          name: profile?.full_name || undefined,
+          metadata: { supabase_user_id: user.id },
+        });
+        customerId = customer.id;
+        await supabaseAdmin
+          .from("profiles")
+          .update({ stripe_customer_id: customerId, updated_at: new Date().toISOString() })
+          .eq("id", user.id);
+      }
+
+      const makePrimary = body.makePrimary !== false && body.makePrimary !== "false";
+      const session = await stripe.checkout.sessions.create({
+        mode: "setup",
+        customer: customerId,
+        payment_method_types: ["card"],
+        metadata: {
+          user_id: user.id,
+          purpose: "save_card",
+          make_primary: makePrimary ? "true" : "false",
+        },
+        success_url: `${siteUrl}/payments?setup=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${siteUrl}/payments?setup=canceled`,
+      });
+
+      return new Response(JSON.stringify({ url: session.url, sessionId: session.id }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // --- SAVE CARD: verify Setup Checkout and store in payment_methods ---
+    if (action === "verify_setup") {
+      if (!serviceKey) {
+        throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured.");
+      }
+      const sessionId = body.sessionId;
+      if (!sessionId) {
+        return new Response(JSON.stringify({ error: "Missing sessionId." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const session = await stripe.checkout.sessions.retrieve(String(sessionId), {
+        expand: ["setup_intent", "setup_intent.payment_method"],
+      });
+
+      if (session.metadata?.user_id && session.metadata.user_id !== user.id) {
+        return new Response(JSON.stringify({ error: "Session does not belong to this user." }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (session.mode !== "setup") {
+        return new Response(JSON.stringify({ error: "Not a card-setup session." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (session.status !== "complete") {
+        return new Response(JSON.stringify({
+          error: "Card setup is not complete yet.",
+          status: session.status,
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const setupIntent = session.setup_intent as Stripe.SetupIntent | null;
+      const pmRef = setupIntent?.payment_method;
+      const paymentMethodId = typeof pmRef === "string" ? pmRef : pmRef?.id;
+      if (!paymentMethodId) {
+        return new Response(JSON.stringify({ error: "No payment method found on setup session." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const supabaseAdmin = createClient(supabaseUrl, serviceKey);
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("stripe_customer_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      let customerId = profile?.stripe_customer_id as string | null | undefined;
+      if (!customerId) {
+        return new Response(JSON.stringify({ error: "Missing Stripe customer on profile." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+      if (pm.customer !== customerId) {
+        await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
+      }
+      await stripe.customers.update(customerId, {
+        invoice_settings: { default_payment_method: paymentMethodId },
+      });
+
+      const type = pm.type === "us_bank_account" ? "bank" : "card";
+      const brand = pm.card?.brand || pm.us_bank_account?.bank_name || null;
+      const lastFour = pm.card?.last4 || pm.us_bank_account?.last4 || null;
+      const expiresAt = pm.card?.exp_year && pm.card?.exp_month
+        ? `${pm.card.exp_year}-${String(pm.card.exp_month).padStart(2, "0")}-01`
+        : null;
+      const makePrimary = session.metadata?.make_primary !== "false";
+
+      const { data: existing } = await supabaseAdmin
+        .from("payment_methods")
+        .select("id")
+        .eq("stripe_payment_method_id", paymentMethodId)
+        .maybeSingle();
+
+      if (!existing?.id) {
+        if (makePrimary) {
+          await supabaseAdmin
+            .from("payment_methods")
+            .update({ is_primary: false })
+            .eq("user_id", user.id)
+            .eq("is_primary", true);
+        }
+
+        const { error: insertError } = await supabaseAdmin.from("payment_methods").insert({
+          user_id: user.id,
+          type,
+          brand,
+          last_four: lastFour,
+          is_primary: makePrimary,
+          expires_at: expiresAt,
+          stripe_payment_method_id: paymentMethodId,
+        });
+
+        // If column missing, retry without stripe_payment_method_id
+        if (insertError) {
+          if (String(insertError.message || "").includes("stripe_payment_method_id")) {
+            await supabaseAdmin.from("payment_methods").insert({
+              user_id: user.id,
+              type,
+              brand,
+              last_four: lastFour,
+              is_primary: makePrimary,
+              expires_at: expiresAt,
+            });
+          } else {
+            throw insertError;
+          }
+        }
+
+        await supabaseAdmin.from("notifications").insert({
+          user_id: user.id,
+          title: "Card saved",
+          body: brand && lastFour
+            ? `Your ${brand} card ending in ${lastFour} was saved for future payments.`
+            : "Your payment method was saved for future payments.",
+          type: "payment",
+        });
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        alreadySaved: Boolean(existing?.id),
+        brand,
+        lastFour,
+        type,
+        stripePaymentMethodId: paymentMethodId,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // --- REMOVE saved card from Stripe + Supabase ---
+    if (action === "remove_card") {
+      if (!serviceKey) {
+        throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured.");
+      }
+      const supabaseAdmin = createClient(supabaseUrl, serviceKey);
+      const rowId = body.id != null ? Number(body.id) : null;
+      const stripePmId = body.stripePaymentMethodId ? String(body.stripePaymentMethodId) : "";
+
+      if (!rowId && !stripePmId) {
+        return new Response(JSON.stringify({ error: "Card id is required." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      let query = supabaseAdmin
+        .from("payment_methods")
+        .select("id, user_id, stripe_payment_method_id, brand, last_four, is_primary")
+        .eq("user_id", user.id);
+
+      query = rowId ? query.eq("id", rowId) : query.eq("stripe_payment_method_id", stripePmId);
+
+      const { data: card, error: cardError } = await query.maybeSingle();
+      if (cardError) throw cardError;
+      if (!card) {
+        return new Response(JSON.stringify({ error: "Card not found." }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const pmId = card.stripe_payment_method_id || stripePmId;
+      if (pmId) {
+        try {
+          await stripe.paymentMethods.detach(pmId);
+        } catch (detachErr) {
+          // Already detached / missing on Stripe — still remove local row
+          console.warn("[remove_card] detach failed:", detachErr);
+        }
+      }
+
+      const { error: deleteError } = await supabaseAdmin
+        .from("payment_methods")
+        .delete()
+        .eq("id", card.id)
+        .eq("user_id", user.id);
+
+      if (deleteError) throw deleteError;
+
+      if (card.is_primary) {
+        const { data: nextCard } = await supabaseAdmin
+          .from("payment_methods")
+          .select("id, stripe_payment_method_id")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (nextCard?.id) {
+          await supabaseAdmin
+            .from("payment_methods")
+            .update({ is_primary: true })
+            .eq("id", nextCard.id);
+
+          if (nextCard.stripe_payment_method_id) {
+            const { data: profile } = await supabaseAdmin
+              .from("profiles")
+              .select("stripe_customer_id")
+              .eq("id", user.id)
+              .maybeSingle();
+            if (profile?.stripe_customer_id) {
+              try {
+                await stripe.customers.update(profile.stripe_customer_id, {
+                  invoice_settings: { default_payment_method: nextCard.stripe_payment_method_id },
+                });
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
+      }
+
+      await supabaseAdmin.from("notifications").insert({
+        user_id: user.id,
+        title: "Card removed",
+        body: card.brand && card.last_four
+          ? `Your ${card.brand} card ending in ${card.last_four} was removed.`
+          : "A saved payment method was removed from your account.",
+        type: "payment",
+      });
+
+      return new Response(JSON.stringify({ success: true, id: card.id }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // --- VERIFY completed Stripe checkout ---
-    if (body.action === "verify" || body.sessionId) {
+    if (action === "verify") {
       if (!serviceKey) {
         throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured for payment verification.");
       }
@@ -785,6 +1073,16 @@ Deno.serve(async (req) => {
       }
 
       const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+      // Setup (save-card) sessions must use verify_setup — don't treat as payment.
+      if (session.mode === "setup") {
+        return new Response(JSON.stringify({
+          error: "This is a card-setup session. Use action verify_setup.",
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
       if (session.metadata?.user_id !== user.id) {
         return new Response(JSON.stringify({ error: "Payment does not belong to this user." }), {
@@ -974,7 +1272,7 @@ Deno.serve(async (req) => {
 
     const priceSuffix = methodConfig.key === "bank"
       ? `Pay now, then $${amount}/month by bank debit on this date each month`
-      : `Pay now, then ₹${amount}/month on this date each month`;
+      : `Pay now, then $${amount}/month on this date each month`;
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",

@@ -10,8 +10,8 @@
 -- What this does:
 --   1. Backfills profiles, households, memberships for existing users
 --   2. Copies household_members → family_members
---   3. Updates plan pricing to ₹1,200 / ₹2,400 / ₹3,600 per year
---   4. Updates monthly recurring amounts to ₹100 / ₹200 / ₹300
+--   3. Updates plan pricing to $1,200 / $2,400 / $3,600 per year
+--   4. Updates monthly recurring amounts to $100 / $200 / $300
 --   5. Refreshes the signup trigger for new users
 -- =============================================================================
 
@@ -275,7 +275,7 @@ begin
 
   insert into public.memberships (user_id, plan_key, membership_name, status, annual_commitment, renewal_date, notes)
   values (
-    new.id, selected_plan, plan_display_name, 'active', selected_commitment,
+    new.id, selected_plan, plan_display_name, 'pending', selected_commitment,
     (current_date + interval '1 year')::date, 'Thank you for joining our community.'
   );
 

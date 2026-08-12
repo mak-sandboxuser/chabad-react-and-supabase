@@ -98,7 +98,7 @@ async function recordTestPayment(
     testMinutes,
     paymentMethod = "card",
     methodLabel = "Stripe Auto-Pay",
-    currency = "inr",
+    currency = "usd",
     pending = false,
   }: {
     userId: string;
@@ -119,9 +119,7 @@ async function recordTestPayment(
 
   if (existing) return false;
 
-  const money = currency === "usd"
-    ? `$${amount.toLocaleString("en-US")}`
-    : `₹${amount.toLocaleString("en-IN")}`;
+  const money = `$${amount.toLocaleString("en-US")}`;
 
   const paidAt = new Date().toISOString();
   const { error } = await supabase.from("payments").insert({
@@ -212,7 +210,7 @@ async function chargeDueSubscription(
 
   const isBank = sub.metadata?.payment_method === "bank";
   const paymentMethodType = isBank ? "us_bank_account" : "card";
-  const currency = (sub.metadata?.currency || (isBank ? "usd" : "inr")).toLowerCase();
+  const currency = (sub.metadata?.currency || "usd").toLowerCase();
   const dbMethod = isBank ? "bank" : "card";
   const methodLabel = isBank ? "Stripe Bank (ACH)" : "Stripe Auto-Pay";
 

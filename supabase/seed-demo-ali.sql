@@ -208,8 +208,8 @@ begin
   insert into public.notifications (user_id, title, body, type, is_read, created_at)
   values
     (v_user_id, 'Welcome to Chabad Bedford', 'Your Standard Membership is active. Explore your member portal.', 'success', true, now() - interval '30 days'),
-    (v_user_id, 'Payment Received', 'We received your monthly contribution of ₹200. Thank you!', 'payment', true, now() - interval '15 days'),
-    (v_user_id, 'Upcoming Contribution', 'Your next monthly contribution of ₹200 is due in 12 days.', 'info', false, now() - interval '2 days'),
+    (v_user_id, 'Payment Received', 'We received your monthly contribution of $200. Thank you!', 'payment', true, now() - interval '15 days'),
+    (v_user_id, 'Upcoming Contribution', 'Your next monthly contribution of $200 is due in 12 days.', 'info', false, now() - interval '2 days'),
     (v_user_id, 'Household Updated', 'Fatima Khan was added to your household.', 'household', true, now() - interval '20 days'),
     (v_user_id, 'Membership Renewal', 'Your membership renews on 15 Jan 2026.', 'system', false, now() - interval '1 day');
 

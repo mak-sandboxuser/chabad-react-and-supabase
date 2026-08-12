@@ -24,7 +24,7 @@ export default function BarChart({ values = [] }) {
           <g key={v}>
             <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="#f1f5f9" strokeWidth="1" />
             <text x={padL - 6} y={y + 4} textAnchor="end" fontSize="9" fill="#9ca3af">
-              {v === 0 ? "₹0" : `₹${v}`}
+              {v === 0 ? "$0" : `$${v}`}
             </text>
           </g>
         );

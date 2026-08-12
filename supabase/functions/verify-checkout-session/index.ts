@@ -85,7 +85,7 @@ async function recordCompletedSession(
   await supabase.from("notifications").insert({
     user_id: userId,
     title: "Payment Successful",
-    body: `Your payment of ₹${amount.toLocaleString("en-IN")} was processed successfully via Stripe.`,
+    body: `Your payment of $${amount.toLocaleString("en-US")} was processed successfully via Stripe.`,
     type: "payment",
   });
 

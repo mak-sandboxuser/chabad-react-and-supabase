@@ -29,17 +29,14 @@ export function getPlanMonthlyAmount(planKey, dbMonthlyAmount) {
   return catalog || 200;
 }
 
-export function formatCurrency(amount, currency = "INR") {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0,
-  }).format(Number(amount || 0));
+export function formatCurrency(amount) {
+  const n = Number(amount || 0);
+  return `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 }
 
 export function formatDate(dateValue, options = {}) {
   if (!dateValue) return "-";
-  return new Date(dateValue).toLocaleDateString("en-IN", {
+  return new Date(dateValue).toLocaleDateString("en-US", {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -49,7 +46,7 @@ export function formatDate(dateValue, options = {}) {
 
 export function formatShortDate(dateValue) {
   if (!dateValue) return "-";
-  return new Date(dateValue).toLocaleDateString("en-IN", {
+  return new Date(dateValue).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -58,7 +55,7 @@ export function formatShortDate(dateValue) {
 
 export function formatTime(dateValue) {
   if (!dateValue) return "";
-  return new Date(dateValue).toLocaleTimeString("en-IN", {
+  return new Date(dateValue).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
   });

@@ -1,4 +1,4 @@
--- Delete "Annual Standard Membership" ₹2,400 payment for ali@gmail.com
+-- Delete "Annual Standard Membership" $2,400 payment for ali@gmail.com
 -- Run in Supabase SQL Editor
 
 delete from public.payments

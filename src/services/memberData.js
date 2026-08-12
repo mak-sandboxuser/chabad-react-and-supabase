@@ -291,6 +291,30 @@ function getPaidTotal(_contributions, payments = []) {
     .reduce((sum, item) => sum + Number(item.amount || 0), 0);
 }
 
+function hasPaidPayment(payments = []) {
+  return payments.some((item) => item.status === "paid");
+}
+
+/** Active only after at least one successful payment; otherwise pending. */
+export function getEffectiveMembershipStatus(membership, payments = []) {
+  const raw = (membership?.status || "pending").toLowerCase();
+
+  if (raw === "cancelled" || raw === "paused" || raw === "overdue") {
+    return raw;
+  }
+
+  if (!hasPaidPayment(payments)) {
+    return "pending";
+  }
+
+  return raw === "active" ? "active" : raw;
+}
+
+function capitalizeStatus(status) {
+  if (!status) return "Pending";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 export function buildCurrentUserData(profile, user, notifications) {
   const displayName = getDisplayName(profile, user);
   const unreadCount = (notifications || []).filter((n) => !n.is_read).length;
@@ -301,6 +325,7 @@ export function buildDashboardData({ profile, user, membership, payments, contri
   const displayName = getDisplayName(profile, user);
   const commitment = getCommitment(membership);
   const paidTotal = getPaidTotal(contributions, payments);
+  const membershipStatus = getEffectiveMembershipStatus(membership, payments);
   const activeAutoPay = recurring.find(
     (item) => item.status === "active" && item.stripe_subscription_id,
   );
@@ -330,8 +355,11 @@ export function buildDashboardData({ profile, user, membership, payments, contri
       },
       {
         label: "Membership Status",
-        value: membership?.status || "pending",
-        sub: membership?.started_at ? `Member since ${formatShortDate(membership.started_at)}` : "Complete membership setup",
+        value: capitalizeStatus(membershipStatus),
+        sub: membershipStatus === "active" && membership?.started_at
+          ? `Member since ${formatShortDate(membership.started_at)}`
+          : "Payment required to activate",
+        valueClass: membershipStatus === "active" ? "text-[#16a34a]" : "text-[#ca8a04]",
       },
       {
         label: "Annual Commitment",
@@ -377,19 +405,20 @@ export function buildDashboardData({ profile, user, membership, payments, contri
   };
 }
 
-export function buildMembershipData({ membership }) {
+export function buildMembershipData({ membership, payments = [] }) {
   const planLabel = membership?.plan_key ? PLAN_LABELS[membership.plan_key] : "Not selected";
   const renewalDays = daysUntil(membership?.renewal_date);
+  const status = getEffectiveMembershipStatus(membership, payments);
   return {
     hero: {
       membershipName: membership?.membership_name || `${planLabel} Membership`,
-      status: membership?.status || "pending",
+      status,
     },
     info: {
       membershipName: membership?.membership_name || `${planLabel} Membership`,
       planKey: membership?.plan_key,
       planLabel,
-      status: membership?.status || "pending",
+      status,
       startedAt: membership?.started_at,
       renewalDate: membership?.renewal_date,
       renewalDays,
@@ -400,7 +429,7 @@ export function buildMembershipData({ membership }) {
       memberSince: membership?.started_at,
       planLabel,
       annualCommitment: getCommitment(membership),
-      status: membership?.status || "pending",
+      status,
       renewalDate: membership?.renewal_date,
     },
   };
@@ -495,6 +524,7 @@ export function buildFinancialData({ membership, contributions, payments, recurr
   const paidPercent = commitment ? Math.round((paidTotal / commitment) * 100) : 0;
   const activeRecurring = recurring.filter((r) => r.status === "active");
   const recurringTotal = activeRecurring.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+  const membershipStatus = getEffectiveMembershipStatus(membership, payments);
 
   const monthlyTotals = Array(12).fill(0);
   payments.forEach((p) => {
@@ -526,7 +556,7 @@ export function buildFinancialData({ membership, contributions, payments, recurr
     })),
     panel: {
       membershipName: membership?.membership_name || PLAN_LABELS[membership?.plan_key],
-      status: membership?.status,
+      status: membershipStatus,
       memberSince: membership?.started_at,
       renewalDate: membership?.renewal_date,
       paymentMethods: paymentMethods.map((pm) => ({
@@ -555,7 +585,7 @@ export function buildContributionsData({ payments }) {
   };
 }
 
-export function buildProfileData({ profile, membership, user }) {
+export function buildProfileData({ profile, membership, user, payments = [] }) {
   const names = profile?.first_name
     ? { firstName: profile.first_name, lastName: profile.last_name || "" }
     : splitFullName(profile?.full_name || "");
@@ -576,7 +606,7 @@ export function buildProfileData({ profile, membership, user }) {
       initials: getInitials(profile?.full_name),
       fullName: profile?.full_name || user?.email,
       memberSince: membership?.started_at,
-      status: membership?.status || "active",
+      status: getEffectiveMembershipStatus(membership, payments),
     },
     security: {
       lastSignIn: profile?.last_sign_in_at || user?.last_sign_in_at,
@@ -644,11 +674,11 @@ export async function fetchAllMemberData() {
     supportConfig,
     currentUser: buildCurrentUserData(profile, user, notifications),
     dashboard: buildDashboardData({ profile, user, membership, payments, contributions, householdMembers, notifications, recurring }),
-    membershipPage: buildMembershipData({ membership }),
+    membershipPage: buildMembershipData({ membership, payments }),
     householdPage: buildHouseholdData({ profile, household, members: householdMembers }),
     financial: buildFinancialData({ membership, contributions, payments, recurring, paymentMethods, billingContact }),
     contributionsPage: buildContributionsData({ payments }),
-    profilePage: buildProfileData({ profile, membership, user }),
+    profilePage: buildProfileData({ profile, membership, user, payments }),
     notificationsPage: buildNotificationsPageData(notifications),
     billingPortalUrl: profile?.billing_portal_url || "https://billing.stripe.com/p/login/your-portal-link",
   };

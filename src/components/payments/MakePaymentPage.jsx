@@ -8,12 +8,16 @@ import PaymentDetailsForm from "./PaymentDetailsForm";
 import PaymentSummary from "./PaymentSummary";
 import ContributionImpact from "./ContributionImpact";
 import SecurePaymentNotice from "./SecurePaymentNotice";
+import AddCardSection from "./AddCardSection";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { formatCurrency, getPlanMonthlyAmount, PLAN_LABELS } from "../../lib/format";
-import { fetchMembership, getAuthUser } from "../../services/memberData";
+import { fetchMembership, fetchPaymentMethods, getAuthUser } from "../../services/memberData";
 import {
   createStripeCheckoutSession,
+  createSaveCardSession,
   verifyStripeCheckoutSession,
+  verifySavedPaymentMethod,
+  removeSavedPaymentMethod,
 } from "../../services/stripePayments";
 
 const TEST_MINUTES = Number(import.meta.env.VITE_AUTO_PAY_TEST_MINUTES || 10);
@@ -23,6 +27,10 @@ export default function MakePaymentPage() {
   const { userName, notificationCount } = useCurrentUser();
   const [searchParams, setSearchParams] = useSearchParams();
   const [paying, setPaying] = useState(false);
+  const [savingCard, setSavingCard] = useState(false);
+  const [removingId, setRemovingId] = useState(null);
+  const [savedCards, setSavedCards] = useState([]);
+  const [payError, setPayError] = useState("");
   const [defaultAmount, setDefaultAmount] = useState("100");
   const [planLabel, setPlanLabel] = useState("Membership");
   const [planKey, setPlanKey] = useState("");
@@ -40,10 +48,19 @@ export default function MakePaymentPage() {
     paymentRecorded: false,
     error: "",
   });
+  const [setupState, setSetupState] = useState({
+    loading: false,
+    saved: false,
+    brand: "",
+    lastFour: "",
+    error: "",
+  });
 
   const subscriptionSuccess = searchParams.get("subscription") === "success";
   const success = searchParams.get("success") === "true";
   const canceled = searchParams.get("canceled") === "true";
+  const setupSuccess = searchParams.get("setup") === "success";
+  const setupCanceled = searchParams.get("setup") === "canceled";
   const sessionId = searchParams.get("session_id");
   const paidSuccess = success || subscriptionSuccess;
 
@@ -63,6 +80,8 @@ export default function MakePaymentPage() {
           amount: String(monthly),
           contributionType: `Monthly — ${label} Membership Auto-Pay`,
         });
+        const methods = await fetchPaymentMethods(user.id);
+        setSavedCards(methods.filter((m) => m.type === "card" || !m.type));
       } catch {
         setDefaultAmount("100");
       }
@@ -72,6 +91,7 @@ export default function MakePaymentPage() {
   }, []);
 
   const verifiedSessionRef = useRef(null);
+  const verifiedSetupRef = useRef(null);
 
   const runVerification = async (id) => {
     setVerifyState({
@@ -124,9 +144,46 @@ export default function MakePaymentPage() {
     runVerification(sessionId);
   }, [paidSuccess, sessionId]);
 
+  const runSetupVerification = async (id) => {
+    setSetupState({ loading: true, saved: false, brand: "", lastFour: "", error: "" });
+    try {
+      const result = await verifySavedPaymentMethod(id);
+      setSetupState({
+        loading: false,
+        saved: true,
+        brand: result.brand || "Card",
+        lastFour: result.lastFour || "",
+        error: "",
+      });
+      const user = await getAuthUser();
+      const methods = await fetchPaymentMethods(user.id);
+      setSavedCards(methods.filter((m) => m.type === "card" || !m.type));
+    } catch (err) {
+      setSetupState({
+        loading: false,
+        saved: false,
+        brand: "",
+        lastFour: "",
+        error: err.message || "Could not save card.",
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (!setupSuccess || !sessionId) return;
+    if (verifiedSetupRef.current === sessionId) return;
+    verifiedSetupRef.current = sessionId;
+    runSetupVerification(sessionId);
+  }, [setupSuccess, sessionId]);
+
   const handlePayWithStripe = async ({ amount, description, notes, paymentMethod, autoPay = true }) => {
     setPaying(true);
+    setPayError("");
     try {
+      if (!amount || Number(amount) < 1) {
+        throw new Error("Membership monthly amount is missing. Choose a plan at signup first.");
+      }
+
       setPaymentData({
         amount: String(amount),
         contributionType: autoPay
@@ -135,7 +192,7 @@ export default function MakePaymentPage() {
       });
 
       const { url } = await createStripeCheckoutSession({
-        amount,
+        amount: Number(amount),
         description,
         notes,
         contributionType: "monthly",
@@ -144,9 +201,57 @@ export default function MakePaymentPage() {
         paymentMethod,
       });
 
-      window.location.href = url;
-    } finally {
+      if (!url) throw new Error("Stripe did not return a checkout URL. Redeploy create-checkout-session.");
+      window.location.assign(url);
+    } catch (err) {
+      const message = err?.message || "Payment could not be started.";
+      setPayError(message);
+      window.alert(message);
       setPaying(false);
+    }
+  };
+
+  const handleAddCard = async () => {
+    setSavingCard(true);
+    setSetupState({ loading: false, saved: false, brand: "", lastFour: "", error: "" });
+    try {
+      const { url } = await createSaveCardSession({ makePrimary: true });
+      if (!url) throw new Error("Stripe did not return a setup URL.");
+      window.location.assign(url);
+    } catch (err) {
+      let message = err?.message || "Could not open Stripe to add a card.";
+      if (/valid payment amount/i.test(message)) {
+        message =
+          "Add card needs the latest create-checkout-session Edge Function. Run:\n\nnpx supabase functions deploy create-checkout-session";
+      }
+      setSetupState({
+        loading: false,
+        saved: false,
+        brand: "",
+        lastFour: "",
+        error: message,
+      });
+      setSavingCard(false);
+      window.alert(message);
+    }
+  };
+
+  const handleRemoveCard = async (card) => {
+    if (!card?.id) return;
+    const label = `${card.brand || "Card"} ···· ${card.last_four || "****"}`;
+    if (!window.confirm(`Remove ${label} from Stripe and your account?`)) return;
+
+    setRemovingId(card.id);
+    try {
+      await removeSavedPaymentMethod({
+        id: card.id,
+        stripePaymentMethodId: card.stripe_payment_method_id,
+      });
+      setSavedCards((prev) => prev.filter((c) => c.id !== card.id));
+    } catch (err) {
+      window.alert(err?.message || "Could not remove card.");
+    } finally {
+      setRemovingId(null);
     }
   };
 
@@ -162,6 +267,7 @@ export default function MakePaymentPage() {
       paymentRecorded: false,
       error: "",
     });
+    setSetupState({ loading: false, saved: false, brand: "", lastFour: "", error: "" });
   };
 
   const summaryAmount =
@@ -170,7 +276,7 @@ export default function MakePaymentPage() {
       : paymentData.amount;
 
   const nextChargeLabel = verifyState.nextChargeDate
-    ? new Date(verifyState.nextChargeDate).toLocaleString("en-IN", {
+    ? new Date(verifyState.nextChargeDate).toLocaleString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric",
@@ -187,7 +293,7 @@ export default function MakePaymentPage() {
         <TopBar userName={userName} notificationCount={notificationCount} title="Make a Payment" />
         <div className="bg-white px-6 -mt-px pb-3 border-b border-gray-100">
           <p className="text-[13px] text-gray-400">
-            Pay your membership amount with Stripe. Auto-Pay is optional.
+            Pay your membership amount with Stripe, or save a card for later. Auto-Pay is optional.
           </p>
         </div>
 
@@ -260,10 +366,65 @@ export default function MakePaymentPage() {
                 </div>
               )}
 
+              {(setupSuccess || setupState.saved || setupState.loading || setupState.error) && (
+                <div className={`rounded-xl border px-4 py-4 ${
+                  setupState.error
+                    ? "border-red-200 bg-red-50"
+                    : setupState.saved
+                      ? "border-green-200 bg-green-50"
+                      : "border-blue-200 bg-blue-50"
+                }`}>
+                  {setupState.loading && (
+                    <p className="text-[13px] text-blue-800">Saving your card to Stripe and your account...</p>
+                  )}
+                  {setupState.saved && (
+                    <>
+                      <p className="text-[14px] font-semibold text-green-800">Card saved</p>
+                      <p className="text-[13px] text-green-700 mt-1">
+                        {setupState.brand}
+                        {setupState.lastFour ? ` ending in ${setupState.lastFour}` : ""} was saved on Stripe and in your account. No charge was made.
+                      </p>
+                      <button type="button" onClick={dismissStatus} className="mt-3 text-green-700 text-[12px] font-semibold">
+                        Dismiss
+                      </button>
+                    </>
+                  )}
+                  {setupState.error && (
+                    <p className="text-[13px] text-red-700">{setupState.error}</p>
+                  )}
+                </div>
+              )}
+
+              {setupCanceled && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[14px] font-semibold text-amber-800">Add card canceled</p>
+                    <p className="text-[13px] text-amber-700 mt-0.5">
+                      No card was saved. You can try again anytime.
+                    </p>
+                  </div>
+                  <button type="button" onClick={dismissStatus} className="text-amber-700 text-[12px] font-semibold">
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
               {!paidSuccess && (
                 <>
                   <PaymentStepper currentStep={1} />
                   <EncouragementBanner />
+                  <AddCardSection
+                    onAddCard={handleAddCard}
+                    onRemoveCard={handleRemoveCard}
+                    saving={savingCard}
+                    removingId={removingId}
+                    savedCards={savedCards}
+                  />
+                  {payError && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">
+                      {payError}
+                    </div>
+                  )}
                   <PaymentDetailsForm
                     defaultAmount={defaultAmount}
                     planLabel={planLabel}
@@ -271,7 +432,9 @@ export default function MakePaymentPage() {
                     testMode={TEST_MODE}
                     testMinutes={TEST_MINUTES}
                     onPayWithStripe={handlePayWithStripe}
+                    onAddCard={handleAddCard}
                     paying={paying}
+                    savingCard={savingCard}
                   />
                 </>
               )}

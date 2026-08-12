@@ -117,7 +117,7 @@ begin
     new.id,
     selected_plan,
     plan_display_name,
-    'active',
+    'pending',
     selected_commitment,
     (current_date + interval '1 year')::date,
     'Thank you for joining our community.'

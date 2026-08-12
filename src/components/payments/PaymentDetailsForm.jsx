@@ -12,9 +12,11 @@ export default function PaymentDetailsForm({
   testMode = false,
   testMinutes = 10,
   onPayWithStripe,
+  onAddCard,
   paying = false,
+  savingCard = false,
 }) {
-  const [autoPay, setAutoPay] = useState(true);
+  const [autoPay, setAutoPay] = useState(false);
   const [notes, setNotes] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("card");
   const [error, setError] = useState("");
@@ -65,7 +67,7 @@ export default function PaymentDetailsForm({
         </label>
         <div className="relative max-w-sm">
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <span className="text-gray-400 text-[15px] font-medium">₹</span>
+            <span className="text-gray-400 text-[15px] font-medium">$</span>
           </div>
           <input
             type="text"
@@ -105,7 +107,7 @@ export default function PaymentDetailsForm({
             icon={CARD_ICON}
             iconColor="text-[#635bff]"
             title="Card"
-            description="Debit or credit card. Billed in ₹ (INR)."
+            description="Debit or credit card. Billed in $ (USD)."
             selected={!isBank}
             onSelect={() => setPaymentMethod("card")}
           />
@@ -155,21 +157,44 @@ export default function PaymentDetailsForm({
         </p>
       )}
 
-      <button
-        type="button"
-        onClick={handlePay}
-        disabled={paying}
-        className="flex items-center gap-2 bg-[#635bff] hover:bg-[#5851e5] disabled:opacity-60 text-white text-[13px] font-semibold px-5 py-3 rounded-xl transition-colors"
-      >
-        {paying
-          ? "Redirecting to Stripe..."
-          : autoPay
-            ? `Pay ${isBank ? `$${monthly}` : formatCurrency(monthly)} by ${isBank ? "bank" : "card"} & Enable Auto-Pay`
-            : `Pay ${isBank ? `$${monthly}` : formatCurrency(monthly)} by ${isBank ? "bank" : "card"} (one-time)`}
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
-        </svg>
-      </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={handlePay}
+          disabled={paying || savingCard}
+          className="flex items-center gap-2 bg-[#635bff] hover:bg-[#5851e5] disabled:opacity-60 text-white text-[13px] font-semibold px-5 py-3 rounded-xl transition-colors"
+        >
+          {paying
+            ? "Redirecting to Stripe..."
+            : autoPay
+              ? `Pay ${isBank ? `$${monthly}` : formatCurrency(monthly)} by ${isBank ? "bank" : "card"} & Enable Auto-Pay`
+              : `Pay ${isBank ? `$${monthly}` : formatCurrency(monthly)} by ${isBank ? "bank" : "card"} (one-time)`}
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+          </svg>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onAddCard?.()}
+          disabled={paying || savingCard}
+          className="flex items-center gap-2 bg-white border-2 border-[#1a2a5e] text-[#1a2a5e] hover:bg-[#eef1f9] disabled:opacity-60 text-[13px] font-semibold px-5 py-3 rounded-xl transition-colors"
+        >
+          {savingCard ? (
+            "Opening Stripe…"
+          ) : (
+            <>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              Add card
+            </>
+          )}
+        </button>
+      </div>
+      <p className="text-[12px] text-gray-400 mt-3">
+        Add card saves your card on Stripe with no charge. Use Pay to charge your membership.
+      </p>
     </div>
   );
 }

@@ -1,10 +1,5 @@
 import { Link } from "react-router-dom";
-
-const currencyFormatter = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  maximumFractionDigits: 0,
-});
+import { formatCurrency } from "../../lib/format";
 
 export default function ContributionSummary({ summary }) {
   const totalCommitment = Number(summary?.totalCommitment || 0);
@@ -15,7 +10,7 @@ export default function ContributionSummary({ summary }) {
   const autoPayTestMode = Boolean(summary?.autoPayTestMode);
   const autoPayTestMinutes = summary?.autoPayTestMinutes || 10;
   const nextDueDate = summary?.nextDueDate
-    ? new Date(summary.nextDueDate).toLocaleString("en-IN", {
+    ? new Date(summary.nextDueDate).toLocaleString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric",
@@ -30,12 +25,10 @@ export default function ContributionSummary({ summary }) {
       <h3 className="text-[15px] font-semibold text-gray-800 mb-5">Contribution Summary</h3>
 
       <div className="grid grid-cols-3 gap-6">
-        {/* Total Contributed */}
         <div>
           <p className="text-[12px] text-gray-400 font-medium mb-2">Total Contributed</p>
-          <p className="text-[22px] font-bold text-[#16a34a] leading-none">{currencyFormatter.format(totalContributed)}</p>
-          <p className="text-[11px] text-gray-400 mt-1">of {currencyFormatter.format(totalCommitment)} annual commitment</p>
-          {/* Progress bar */}
+          <p className="text-[22px] font-bold text-[#16a34a] leading-none">{formatCurrency(totalContributed)}</p>
+          <p className="text-[11px] text-gray-400 mt-1">of {formatCurrency(totalCommitment)} annual commitment</p>
           <div className="mt-3">
             <div className="w-full bg-gray-100 rounded-full h-2">
               <div
@@ -47,10 +40,9 @@ export default function ContributionSummary({ summary }) {
           </div>
         </div>
 
-        {/* Outstanding Balance */}
         <div>
           <p className="text-[12px] text-gray-400 font-medium mb-2">Outstanding Balance</p>
-          <p className="text-[22px] font-bold text-[#e53e3e] leading-none">{currencyFormatter.format(outstanding)}</p>
+          <p className="text-[22px] font-bold text-[#e53e3e] leading-none">{formatCurrency(outstanding)}</p>
           <p className="text-[11px] text-gray-400 mt-1">Remaining toward annual commitment</p>
           <Link
             to="/payments"
@@ -60,10 +52,9 @@ export default function ContributionSummary({ summary }) {
           </Link>
         </div>
 
-        {/* Next Scheduled */}
         <div>
           <p className="text-[12px] text-gray-400 font-medium mb-2">Next Scheduled Contribution</p>
-          <p className="text-[22px] font-bold text-[#1a2a5e] leading-none">{currencyFormatter.format(nextAmount)}</p>
+          <p className="text-[22px] font-bold text-[#1a2a5e] leading-none">{formatCurrency(nextAmount)}</p>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <p className="text-[11px] text-gray-400">
               {autoPayEnabled && autoPayTestMode

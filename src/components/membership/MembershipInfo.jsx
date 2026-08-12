@@ -1,4 +1,5 @@
 import { formatCurrency, formatDate } from "../../lib/format";
+import { getStatusBadgeClass } from "../../lib/membershipStatus";
 
 const InfoRow = ({ icon, label, children }) => (
   <div className="flex items-start gap-4 py-4 border-b border-gray-50 last:border-0">
@@ -17,6 +18,8 @@ const InfoRow = ({ icon, label, children }) => (
 export default function MembershipInfo({ info }) {
   if (!info) return null;
 
+  const isActive = info.status === "active";
+
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-6">
       <h3 className="text-[15px] font-semibold text-gray-800 mb-2">Membership Information</h3>
@@ -33,10 +36,12 @@ export default function MembershipInfo({ info }) {
 
       <InfoRow icon="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" label="Membership Status">
         <div className="flex items-center gap-2.5">
-          <span className="bg-[#dcfce7] text-[#16a34a] text-[11px] font-semibold px-2.5 py-0.5 rounded-full capitalize">
+          <span className={`${getStatusBadgeClass(info.status)} text-[11px] font-semibold px-2.5 py-0.5 rounded-full capitalize`}>
             {info.status}
           </span>
-          <span className="text-[13px] text-gray-500">In good standing</span>
+          <span className="text-[13px] text-gray-500">
+            {isActive ? "In good standing" : "Awaiting first payment"}
+          </span>
         </div>
       </InfoRow>
 
@@ -47,7 +52,7 @@ export default function MembershipInfo({ info }) {
       <InfoRow icon="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" label="Renewal Date">
         <div className="flex items-center gap-2.5">
           {formatDate(info.renewalDate)}
-          {info.renewalDays != null && info.renewalDays > 0 && (
+          {info.renewalDays != null && info.renewalDays > 0 && isActive && (
             <span className="bg-[#dbeafe] text-[#1a6bdc] text-[11px] font-semibold px-2.5 py-0.5 rounded-full">
               Next renewal in {info.renewalDays} days
             </span>

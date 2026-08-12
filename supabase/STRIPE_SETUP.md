@@ -3,7 +3,7 @@
 ## 1. Stripe Dashboard
 
 1. Create account at https://dashboard.stripe.com
-2. Enable **INR** currency in Settings → Payment methods
+2. Enable **USD** currency in Settings → Payment methods
 3. Copy keys from **Developers → API keys**:
    - Publishable key: `pk_test_...`
    - Secret key: `sk_test_...`
@@ -31,8 +31,11 @@ supabase secrets set SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 supabase functions deploy create-checkout-session
 supabase functions deploy create-billing-portal
+supabase functions deploy save-payment-method
 supabase functions deploy stripe-webhook --no-verify-jwt
 ```
+
+Also run SQL once: `supabase/save-payment-method.sql` (adds `stripe_payment_method_id` on `payment_methods`).
 
 ## 4. Stripe Webhook
 
@@ -74,9 +77,9 @@ Payment is saved to `payments` table and a notification is created after webhook
 Membership payments are **subscription Auto-Pay only** (no one-time option).
 
 Plans:
-- Basic: ₹1,200/year → ₹100/month
-- Standard: ₹2,400/year → ₹200/month
-- Premium: ₹3,600/year → ₹300/month
+- Basic: $1,200/year → $100/month
+- Standard: $2,400/year → $200/month
+- Premium: $3,600/year → $300/month
 
 ### Enable 10-minute test billing
 
